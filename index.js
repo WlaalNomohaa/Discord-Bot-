@@ -5,8 +5,10 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ]
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.DirectMessages // Waxaa lagu daray si uu DM-ka u akhriyo
+    ],
+    partials: ['Channel'] // Waxaa loo baahan yahay si DM-ka dhexdiisa fariinta looga qabto
 });
 
 // Kaydka kumeel-gaarka ah (RAM)
@@ -58,6 +60,21 @@ const commands = [
         .setDescription('Ka qaad slowmode-ka channel-ka aad joogto (Admins Only).')
 ].map(command => command.toJSON());
 
+// Badhamada guud ee la isticmaalayo (Buttons setup)
+const getButtonsRow = () => {
+    return new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setLabel('Add Server 🔥')
+                .setStyle(ButtonStyle.Link)
+                .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot'),
+            new ButtonBuilder()
+                .setLabel('Contact Support 👍')
+                .setStyle(ButtonStyle.Link)
+                .setURL('https://discord.com/users/1483111151469465722') // ID-gaaga Admin-ka
+        );
+};
+
 // 2. Markii bot-ku uu online soo galo
 client.once('ready', async () => {
     console.log(`🎉 Sky 🌟 waa diyaar! ${client.user.tag}`);
@@ -73,28 +90,15 @@ client.once('ready', async () => {
     }
 });
 
-// 3. Marka Bot-ka lagu daro Server Cusub (Wuxuu DM u dirayaa Owner-ka isagoo wata Buttons)
+// 3. Marka Bot-ka lagu daro Server Cusub
 client.on('guildCreate', async (guild) => {
     try {
         const owner = await guild.fetchOwner();
         if (!owner) return;
 
-        // Abuurista badhamada (Buttons)
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('Add Server 🔥')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot'),
-                new ButtonBuilder()
-                    .setLabel('Contact Support 👍')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL('https://discord.com/users/1483111151469465722') // ID-gaaga Admin-ka
-            );
-
         await owner.send({
             content: `Hi ${owner.user}\nAdd Your Server 🔍\n\nClick the buttons below to add the bot or get support:`,
-            components: [row]
+            components: [getButtonsRow()]
         });
         console.log(`Farriinta DM-ka oo badhammo leh waxaa loo diray Owner-ka: ${guild.name}`);
     } catch (err) {
@@ -107,7 +111,7 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     const { commandName, channel, guild, member, user } = interaction;
 
-    // --- /help ---
+    // --- /help (Hadda badhamada waa la raaciyay) ---
     if (commandName === 'help') {
         const helpMessage = 
             `Hi ${user} I'm Sky Bot Information 👇\n\n` +
@@ -122,7 +126,10 @@ client.on('interactionCreate', async interaction => {
             `Waqti dhow saaxiib! Waad ku mahadsantahay doorashada aad i dooratay 🔥`;
 
         try {
-            await user.send(helpMessage);
+            await user.send({
+                content: helpMessage,
+                components: [getButtonsRow()] // Labadii badhan ayaa halkan lagu daray
+            });
             await interaction.reply({ content: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga!', ephemeral: true });
         } catch (err) {
             await interaction.reply({ content: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.', ephemeral: true });
@@ -138,7 +145,7 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    // --- /clean (AMARKA CUSUB) ---
+    // --- /clean ---
     if (commandName === 'clean') {
         const amount = interaction.options.getInteger('amount');
 
@@ -147,12 +154,11 @@ client.on('interactionCreate', async interaction => {
         }
 
         try {
-            // Tirtir farriimaha
             const deleted = await channel.bulkDelete(amount, true);
             await interaction.reply({ content: `🧹 Si guul leh ayaa channel-ka looga tirtiray **${deleted.size}** farriimood!`, ephemeral: true });
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay (Farriimaha ka weyn 14 maalmood bot-ku ma tirtiri karo).', ephemeral: true });
+            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay.', ephemeral: true });
         }
     }
 
@@ -226,10 +232,34 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 5. Qabashada iyo tirtirista fariimaha spam-ka ah
+// 5. Qabashada fariimaha (Spam & DM Auto-Responder)
 client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild || !message.member) return;
+    if (message.author.bot) return;
 
+    // --- QAYBTA DM-KA (Haddii qofku bot-ka DM ugu soo qoro wax kasta) ---
+    if (message.channel.type === ChannelType.DM) {
+        try {
+            // Abuur kaliya badhanka add server-ka sidii aad codsatay
+            const dmRow = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setLabel('Add Server 🔥')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot')
+                );
+
+            await message.author.send({
+                content: `Hi ${message.author}\nUse / I'm Working! or Add Your Server 🔍`,
+                components: [dmRow]
+            });
+        } catch (err) {
+            console.error('Ma u diri karo jawaab DM-ka:', err);
+        }
+        return; // Jooji halkan si uusan koodhka hoose u raadin server spam
+    }
+
+    // --- QAYBTA SERVER SPAM-KA ---
+    if (!message.guild || !message.member) return;
     if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
     const serverSpamWords = spamWords[message.guild.id] || [];
@@ -241,7 +271,7 @@ client.on('messageCreate', async message => {
     if (hasSpam) {
         try {
             await message.delete(); 
-            const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tay eray mamnuuc ah!`);
+            const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`);
             setTimeout(() => warning.delete().catch(() => null), 5000); 
         } catch (err) {
             console.error('Ma tirtiri karo farriinta:', err);
