@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const client = new Client({
     intents: [
@@ -18,6 +18,11 @@ const commands = [
     new SlashCommandBuilder()
         .setName('help')
         .setDescription('Wuxuu DM kuugu soo dirayaa macluumaadka bot-ka iyo amarradiisa.'),
+
+    new SlashCommandBuilder()
+        .setName('clean')
+        .setDescription('Ka tirtir channel-ka dhowr farriimood hal mara (Admins Only).')
+        .addIntegerOption(option => option.setName('amount').setDescription('Inta farriimood oo la tirtirayo (1-100)').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('setwelcome')
@@ -68,18 +73,30 @@ client.once('ready', async () => {
     }
 });
 
-// 3. Marka Bot-ka lagu daro Server Cusub (Guild Create Event)
+// 3. Marka Bot-ka lagu daro Server Cusub (Wuxuu DM u dirayaa Owner-ka isagoo wata Buttons)
 client.on('guildCreate', async (guild) => {
     try {
         const owner = await guild.fetchOwner();
         if (!owner) return;
 
-        await owner.send(
-            `Hi ${owner.user}\n` +
-            `Add Your Server 🔍\n\n` +
-            `[Add Your Server Bot ⏳](https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot)`
-        );
-        console.log(`Farriinta DM-ka waxaa si guul leh loogu diray Owner-ka: ${guild.name}`);
+        // Abuurista badhamada (Buttons)
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('Add Server 🔥')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot'),
+                new ButtonBuilder()
+                    .setLabel('Contact Support 👍')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL('https://discord.com/users/1483111151469465722') // ID-gaaga Admin-ka
+            );
+
+        await owner.send({
+            content: `Hi ${owner.user}\nAdd Your Server 🔍\n\nClick the buttons below to add the bot or get support:`,
+            components: [row]
+        });
+        console.log(`Farriinta DM-ka oo badhammo leh waxaa loo diray Owner-ka: ${guild.name}`);
     } catch (err) {
         console.error('Wuu xirnaa DM-ka Owner-ka:', err);
     }
@@ -90,11 +107,12 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     const { commandName, channel, guild, member, user } = interaction;
 
-    // --- /help (Wuxuu u shaqaynayaa qof walba, wuxuuna tagayaa DM) ---
+    // --- /help ---
     if (commandName === 'help') {
         const helpMessage = 
             `Hi ${user} I'm Sky Bot Information 👇\n\n` +
             `/setwelcome - Samey Welcome Message\n` +
+            `/clean - Ka tirtir channel-ka farriimaha (1-100)\n` +
             `/kick - User Kick Gareey\n` +
             `/lock - Xir Channel-ka\n` +
             `/unlock - Fur Channel-ka\n` +
@@ -105,7 +123,7 @@ client.on('interactionCreate', async interaction => {
 
         try {
             await user.send(helpMessage);
-            await interaction.reply({ content: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga! Hubi fariimahaaga gaarka ah.', ephemeral: true });
+            await interaction.reply({ content: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga!', ephemeral: true });
         } catch (err) {
             await interaction.reply({ content: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.', ephemeral: true });
         }
@@ -118,6 +136,24 @@ client.on('interactionCreate', async interaction => {
             content: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ee Server-ka ayaa isticmaali kara amarradan.', 
             ephemeral: true 
         });
+    }
+
+    // --- /clean (AMARKA CUSUB) ---
+    if (commandName === 'clean') {
+        const amount = interaction.options.getInteger('amount');
+
+        if (amount < 1 || amount > 100) {
+            return interaction.reply({ content: '❌ Fadlan dooro tiro u dhaxeysa 1 ilaa 100 farriimood.', ephemeral: true });
+        }
+
+        try {
+            // Tirtir farriimaha
+            const deleted = await channel.bulkDelete(amount, true);
+            await interaction.reply({ content: `🧹 Si guul leh ayaa channel-ka looga tirtiray **${deleted.size}** farriimood!`, ephemeral: true });
+        } catch (err) {
+            console.error(err);
+            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay (Farriimaha ka weyn 14 maalmood bot-ku ma tirtiri karo).', ephemeral: true });
+        }
     }
 
     // --- /setwelcome ---
@@ -144,7 +180,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🔒 Erayga **"${word}"** waxaa lagu daray liiska spam-ka ee server-kan laga mamnuucay!`, ephemeral: true });
     }
 
-    // --- /lock (Hadda waa Ephemeral/Private) ---
+    // --- /lock ---
     if (commandName === 'lock') {
         try {
             await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
@@ -154,7 +190,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- /unlock (Hadda waa Ephemeral/Private) ---
+    // --- /unlock ---
     if (commandName === 'unlock') {
         try {
             await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
@@ -164,7 +200,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- /kick (Hadda waa Ephemeral/Private) ---
+    // --- /kick ---
     if (commandName === 'kick') {
         const targetUser = interaction.options.getUser('user');
         const targetMember = guild.members.cache.get(targetUser.id);
@@ -176,14 +212,14 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `👢 **${targetUser.tag}** si guul leh ayaa looga kick gareeyey server-ka!`, ephemeral: true });
     }
 
-    // --- /slowmode (Hadda waa Ephemeral/Private) ---
+    // --- /slowmode ---
     if (commandName === 'slowmode') {
         const seconds = interaction.options.getInteger('seconds');
         await channel.setRateLimitPerUser(seconds);
         await interaction.reply({ content: `⏱️ Slowmode-ka channel-ka waxaa lagu xiray **${seconds}** ilbiriqsi.`, ephemeral: true });
     }
 
-    // --- /offslowmode (Hadda waa Ephemeral/Private) ---
+    // --- /offslowmode ---
     if (commandName === 'offslowmode') {
         await channel.setRateLimitPerUser(0);
         await interaction.reply({ content: '⏱️ Slowmode-ka si guul leh ayaa looga qaaday channel-ka!', ephemeral: true });
@@ -205,7 +241,7 @@ client.on('messageCreate', async message => {
     if (hasSpam) {
         try {
             await message.delete(); 
-            const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`);
+            const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tay eray mamnuuc ah!`);
             setTimeout(() => warning.delete().catch(() => null), 5000); 
         } catch (err) {
             console.error('Ma tirtiri karo farriinta:', err);
