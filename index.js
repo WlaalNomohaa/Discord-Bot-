@@ -9,12 +9,16 @@ const client = new Client({
     ]
 });
 
-// Kaydka kumeel-gaarka ah (Wuxuu xasuusanayaa server walba xogtiisa)
+// Kaydka kumeel-gaarka ah (RAM)
 let welcomeConfigs = {}; 
-let spamWords = {}; // Waxaan u weydiinaynaa qaab server walba liis u gaar ah leeyahay
+let spamWords = {}; 
 
 // 1. Diyaarinta dhamaan amarrada (Slash Commands)
 const commands = [
+    new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('Wuxuu DM kuugu soo dirayaa macluumaadka bot-ka iyo amarradiisa.'),
+
     new SlashCommandBuilder()
         .setName('setwelcome')
         .setDescription('Habee farriinta soo dhoweynta xubnaha cusub (Admins Only).')
@@ -23,7 +27,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('spam')
-        .setDescription('Ku dar erayada mamnuuca ah ee la tirtirayo marka la qoro (Admins Only).')
+        .setDescription('Ku dar erayada mamnuuca ah ee la tirtirayo (Admins Only).')
         .addStringOption(option => option.setName('word').setDescription('Qor erayga ama jumlada mamnuuca ah').setRequired(true)),
 
     new SlashCommandBuilder()
@@ -56,7 +60,7 @@ client.once('ready', async () => {
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('Bilaabaya diiwaangelinta amarrada u shaqaynaya Admin-ka oo kaliya...');
+        console.log('Bilaabaya diiwaangelinta amarrada...');
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
         console.log('Dhammaan amarrada si guul leh ayaa loo galiyay! 🔥');
     } catch (error) {
@@ -64,12 +68,51 @@ client.once('ready', async () => {
     }
 });
 
-// 3. Ka jawaabista Slash Commands
+// 3. Marka Bot-ka lagu daro Server Cusub (Guild Create Event)
+client.on('guildCreate', async (guild) => {
+    try {
+        const owner = await guild.fetchOwner();
+        if (!owner) return;
+
+        await owner.send(
+            `Hi ${owner.user}\n` +
+            `Add Your Server 🔍\n\n` +
+            `[Add Your Server Bot ⏳](https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot)`
+        );
+        console.log(`Farriinta DM-ka waxaa si guul leh loogu diray Owner-ka: ${guild.name}`);
+    } catch (err) {
+        console.error('Wuu xirnaa DM-ka Owner-ka:', err);
+    }
+});
+
+// 4. Ka jawaabista Slash Commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
-    const { commandName, channel, guild, member } = interaction;
+    const { commandName, channel, guild, member, user } = interaction;
 
-    // AMNIGA: Hubi haddii qofka amarka bixinaya uu yahay Administrator
+    // --- /help (Wuxuu u shaqaynayaa qof walba, wuxuuna tagayaa DM) ---
+    if (commandName === 'help') {
+        const helpMessage = 
+            `Hi ${user} I'm Sky Bot Information 👇\n\n` +
+            `/setwelcome - Samey Welcome Message\n` +
+            `/kick - User Kick Gareey\n` +
+            `/lock - Xir Channel-ka\n` +
+            `/unlock - Fur Channel-ka\n` +
+            `/slowmode - Saar daqiiqado Channel-ka\n` +
+            `/offslowmode - Ka qaad daqiiqadaha\n` +
+            `/spam - Xir Hadalada Xun Xun\n\n` +
+            `Waqti dhow saaxiib! Waad ku mahadsantahay doorashada aad i dooratay 🔥`;
+
+        try {
+            await user.send(helpMessage);
+            await interaction.reply({ content: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga! Hubi fariimahaaga gaarka ah.', ephemeral: true });
+        } catch (err) {
+            await interaction.reply({ content: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.', ephemeral: true });
+        }
+        return;
+    }
+
+    // AMNIGA: Amarrada kale oo dhan waa inay Admins oggolaansho u haystaan
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({ 
             content: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ee Server-ka ayaa isticmaali kara amarradan.', 
@@ -88,9 +131,8 @@ client.on('interactionCreate', async interaction => {
 
     // --- /spam ---
     if (commandName === 'spam') {
-        const word = interaction.options.getString('word').toLowerCase();
+        const word = interaction.options.getString('word').toLowerCase().trim();
         
-        // Haddii server-kan uusan weli lahayn liis spam ah, u abuur mid gaar ah
         if (!spamWords[guild.id]) {
             spamWords[guild.id] = [];
         }
@@ -102,77 +144,76 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🔒 Erayga **"${word}"** waxaa lagu daray liiska spam-ka ee server-kan laga mamnuucay!`, ephemeral: true });
     }
 
-    // --- /lock ---
+    // --- /lock (Hadda waa Ephemeral/Private) ---
     if (commandName === 'lock') {
         try {
             await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
-            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray!** Xubnaha caadiga fariin ma qori karaan.' });
+            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray!** Xubnaha caadiga fariin ma qori karaan.', ephemeral: true });
         } catch (err) {
             await interaction.reply({ content: '❌ Waxaa dhacay khalad marka la xirayay channel-ka.', ephemeral: true });
         }
     }
 
-    // --- /unlock ---
+    // --- /unlock (Hadda waa Ephemeral/Private) ---
     if (commandName === 'unlock') {
         try {
             await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
-            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!** Mar kale fariin waa la qori karaa.' });
+            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!** Mar kale fariin waa la qori koree.', ephemeral: true });
         } catch (err) {
             await interaction.reply({ content: '❌ Waxaa dhacay khalad marka la furayay channel-ka.', ephemeral: true });
         }
     }
 
-    // --- /kick ---
+    // --- /kick (Hadda waa Ephemeral/Private) ---
     if (commandName === 'kick') {
         const targetUser = interaction.options.getUser('user');
         const targetMember = guild.members.cache.get(targetUser.id);
         
         if (!targetMember) return interaction.reply({ content: '❌ Qofkan lagama helin server-ka.', ephemeral: true });
-        if (!targetMember.kickable) return interaction.reply({ content: '❌ Bot-ku awood uma laha inuu kick gareeyo qofkan (Xilkiisa ayaa sarreeya).', ephemeral: true });
+        if (!targetMember.kickable) return interaction.reply({ content: '❌ Bot-ku awood uma laha inuu kick gareeyo qofkan.', ephemeral: true });
         
         await targetMember.kick();
-        await interaction.reply({ content: `👢 **${targetUser.tag}** si guul leh ayaa looga kick gareeyey server-ka!` });
+        await interaction.reply({ content: `👢 **${targetUser.tag}** si guul leh ayaa looga kick gareeyey server-ka!`, ephemeral: true });
     }
 
-    // --- /slowmode ---
+    // --- /slowmode (Hadda waa Ephemeral/Private) ---
     if (commandName === 'slowmode') {
         const seconds = interaction.options.getInteger('seconds');
         await channel.setRateLimitPerUser(seconds);
-        await interaction.reply({ content: `⏱️ Slowmode-ka channel-ka waxaa lagu xiray **${seconds}** ilbiriqsi.` });
+        await interaction.reply({ content: `⏱️ Slowmode-ka channel-ka waxaa lagu xiray **${seconds}** ilbiriqsi.`, ephemeral: true });
     }
 
-    // --- /offslowmode ---
+    // --- /offslowmode (Hadda waa Ephemeral/Private) ---
     if (commandName === 'offslowmode') {
         await channel.setRateLimitPerUser(0);
-        await interaction.reply({ content: '⏱️ Slowmode-ka si guul leh ayaa looga qaaday channel-ka!' });
+        await interaction.reply({ content: '⏱️ Slowmode-ka si guul leh ayaa looga qaaday channel-ka!', ephemeral: true });
     }
 });
 
-// 4. Qabashada iyo tirtirista fariimaha spam-ka ah
+// 5. Qabashada iyo tirtirista fariimaha spam-ka ah
 client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
+    if (message.author.bot || !message.guild || !message.member) return;
 
-    // Haddii uu qofka fariinta qoray yahay Admin, ha tirtirin fariintiisa
     if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
     const serverSpamWords = spamWords[message.guild.id] || [];
+    if (serverSpamWords.length === 0) return;
+
     const contentLower = message.content.toLowerCase();
-    
-    // Hubi haddii qoraalka uu ku jiro mid ka mid ah erayada mamnuuca ah ee server-kaas
     const hasSpam = serverSpamWords.some(word => contentLower.includes(word));
 
     if (hasSpam) {
         try {
-            await message.delete(); // Tirtir farriinta spam-ka ah
+            await message.delete(); 
             const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`);
-            setTimeout(() => warning.delete().catch(() => null), 5000); // Tirtir digniinta 5 ilbiriqsi kadib
+            setTimeout(() => warning.delete().catch(() => null), 5000); 
         } catch (err) {
             console.error('Ma tirtiri karo farriinta:', err);
         }
     }
 });
 
-// 5. Nidaamka soo dhoweynta (Welcome) ee server walba u gaarka ah
+// 6. Nidaamka soo dhoweynta (Welcome)
 client.on('guildMemberAdd', async member => {
     const config = welcomeConfigs[member.guild.id];
     if (!config) return;
@@ -180,7 +221,6 @@ client.on('guildMemberAdd', async member => {
     const welcomeChannel = member.guild.channels.cache.get(config.channelId);
     if (!welcomeChannel) return;
 
-    // Beddelayaasha {user} iyo {server}
     let msg = config.messageText
         .replace(/{user}/g, `${member}`)
         .replace(/{server}/g, `${member.guild.name}`);
