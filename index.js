@@ -1,21 +1,38 @@
 const { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const mongoose = require('mongoose');
 
+// 1. ISKU-XIRKA MONGODB DATABASE
+const MONGO_URI = 'mongodb+srv://wlaalsomohaa_db_user:VfQpG1Ob1ybaK0HS@cluster0.3ir9btq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+
+mongoose.connect(MONGO_URI)
+    .then(() => console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay MongoDB Cloud!'))
+    .catch(err => console.error('❌ Khalad ayaa dhacay marka lala xiriirayay MongoDB:', err));
+
+// Sameynta naqshada xogta (Schemas)
+const WelcomeSchema = mongoose.model('Welcome', new mongoose.Schema({
+    guildId: { type: String, required: true, unique: true },
+    channelId: String,
+    messageText: String
+}));
+
+const SpamSchema = mongoose.model('Spam', new mongoose.Schema({
+    guildId: { type: String, required: true, unique: true },
+    words: [String]
+}));
+
+// Bilaabista Client-ka Discord-ka
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.DirectMessages // Waxaa lagu daray si uu DM-ka u akhriyo
+        GatewayIntentBits.DirectMessages
     ],
-    partials: ['Channel'] // Waxaa loo baahan yahay si DM-ka dhexdiisa fariinta looga qabto
+    partials: ['Channel']
 });
 
-// Kaydka kumeel-gaarka ah (RAM)
-let welcomeConfigs = {}; 
-let spamWords = {}; 
-
-// 1. Diyaarinta dhamaan amarrada (Slash Commands)
+// 2. Diyaarinta dhamaan amarrada (Slash Commands)
 const commands = [
     new SlashCommandBuilder()
         .setName('help')
@@ -60,7 +77,6 @@ const commands = [
         .setDescription('Ka qaad slowmode-ka channel-ka aad joogto (Admins Only).')
 ].map(command => command.toJSON());
 
-// Badhamada guud ee la isticmaalayo (Buttons setup)
 const getButtonsRow = () => {
     return new ActionRowBuilder()
         .addComponents(
@@ -71,11 +87,11 @@ const getButtonsRow = () => {
             new ButtonBuilder()
                 .setLabel('Contact Support 👍')
                 .setStyle(ButtonStyle.Link)
-                .setURL('https://discord.com/users/1483111151469465722') // ID-gaaga Admin-ka
+                .setURL('https://discord.com/users/1483111151469465722')
         );
 };
 
-// 2. Markii bot-ku uu online soo galo
+// 3. Markii bot-ku uu online soo galo
 client.once('ready', async () => {
     console.log(`🎉 Sky 🌟 waa diyaar! ${client.user.tag}`);
     client.user.setActivity('Maamulka Server-ka', { type: ActivityType.Watching });
@@ -90,7 +106,7 @@ client.once('ready', async () => {
     }
 });
 
-// 3. Marka Bot-ka lagu daro Server Cusub
+// 4. Marka Bot-ka lagu daro Server Cusub
 client.on('guildCreate', async (guild) => {
     try {
         const owner = await guild.fetchOwner();
@@ -100,18 +116,17 @@ client.on('guildCreate', async (guild) => {
             content: `Hi ${owner.user}\nAdd Your Server 🔍\n\nClick the buttons below to add the bot or get support:`,
             components: [getButtonsRow()]
         });
-        console.log(`Farriinta DM-ka oo badhammo leh waxaa loo diray Owner-ka: ${guild.name}`);
     } catch (err) {
         console.error('Wuu xirnaa DM-ka Owner-ka:', err);
     }
 });
 
-// 4. Ka jawaabista Slash Commands
+// 5. Ka jawaabista Slash Commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     const { commandName, channel, guild, member, user } = interaction;
 
-    // --- /help (Hadda badhamada waa la raaciyay) ---
+    // --- /help ---
     if (commandName === 'help') {
         const helpMessage = 
             `Hi ${user} I'm Sky Bot Information 👇\n\n` +
@@ -126,10 +141,7 @@ client.on('interactionCreate', async interaction => {
             `Waqti dhow saaxiib! Waad ku mahadsantahay doorashada aad i dooratay 🔥`;
 
         try {
-            await user.send({
-                content: helpMessage,
-                components: [getButtonsRow()] // Labadii badhan ayaa halkan lagu daray
-            });
+            await user.send({ content: helpMessage, components: [getButtonsRow()] });
             await interaction.reply({ content: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga!', ephemeral: true });
         } catch (err) {
             await interaction.reply({ content: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.', ephemeral: true });
@@ -137,62 +149,61 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-    // AMNIGA: Amarrada kale oo dhan waa inay Admins oggolaansho u haystaan
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ 
-            content: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ee Server-ka ayaa isticmaali kara amarradan.', 
-            ephemeral: true 
-        });
+        return interaction.reply({ content: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ayaa isticmaali kara amarradan.', ephemeral: true });
     }
 
     // --- /clean ---
     if (commandName === 'clean') {
         const amount = interaction.options.getInteger('amount');
-
-        if (amount < 1 || amount > 100) {
-            return interaction.reply({ content: '❌ Fadlan dooro tiro u dhaxeysa 1 ilaa 100 farriimood.', ephemeral: true });
-        }
+        if (amount < 1 || amount > 100) return interaction.reply({ content: '❌ Fadlan dooro tiro u dhaxeysa 1 ilaa 100 farriimood.', ephemeral: true });
 
         try {
             const deleted = await channel.bulkDelete(amount, true);
             await interaction.reply({ content: `🧹 Si guul leh ayaa channel-ka looga tirtiray **${deleted.size}** farriimood!`, ephemeral: true });
         } catch (err) {
-            console.error(err);
             await interaction.reply({ content: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay.', ephemeral: true });
         }
     }
 
-    // --- /setwelcome ---
+    // --- /setwelcome (MONGODB SAVING) ---
     if (commandName === 'setwelcome') {
         const targetChannel = interaction.options.getChannel('channel');
         const text = interaction.options.getString('text');
         
-        welcomeConfigs[guild.id] = { channelId: targetChannel.id, messageText: text };
-        await interaction.reply({ content: `✅ Si guul leh ayaa loo habeeyay soo dhoweynta! Channel: ${targetChannel}. Text: "${text}"`, ephemeral: true });
+        await WelcomeSchema.findOneAndUpdate(
+            { guildId: guild.id },
+            { channelId: targetChannel.id, messageText: text },
+            { upsert: true, new: true }
+        );
+        
+        await interaction.reply({ content: `✅ Si guul leh ayaa loo habeeyay oo MongoDB loogu kaydiyey soo dhoweynta! Channel: ${targetChannel}.`, ephemeral: true });
     }
 
-    // --- /spam ---
+    // --- /spam (MONGODB SAVING) ---
     if (commandName === 'spam') {
         const word = interaction.options.getString('word').toLowerCase().trim();
         
-        if (!spamWords[guild.id]) {
-            spamWords[guild.id] = [];
+        let spamDoc = await SpamSchema.findOne({ guildId: guild.id });
+        if (!spamDoc) {
+            spamDoc = new SpamSchema({ guildId: guild.id, words: [] });
         }
         
-        if (!spamWords[guild.id].includes(word)) {
-            spamWords[guild.id].push(word);
+        if (!spamDoc.words.includes(word)) {
+            spamDoc.words.push(word);
+            await spamDoc.save();
         }
         
-        await interaction.reply({ content: `🔒 Erayga **"${word}"** waxaa lagu daray liiska spam-ka ee server-kan laga mamnuucay!`, ephemeral: true });
+        await interaction.reply({ content: `🔒 Erayga **"${word}"** waa la mamnuucay, si rasmiga ahna MongoDB ayaa loogu kaydiyey!`, ephemeral: true });
     }
 
     // --- /lock ---
     if (commandName === 'lock') {
         try {
             await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
-            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray!** Xubnaha caadiga fariin ma qori karaan.', ephemeral: true });
+            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray!**', ephemeral: true });
         } catch (err) {
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka la xirayay channel-ka.', ephemeral: true });
+            await interaction.reply({ content: '❌ Waxaa dhacay khalad.', ephemeral: true });
         }
     }
 
@@ -200,9 +211,9 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'unlock') {
         try {
             await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
-            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!** Mar kale fariin waa la qori koree.', ephemeral: true });
+            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!**', ephemeral: true });
         } catch (err) {
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka la furayay channel-ka.', ephemeral: true });
+            await interaction.reply({ content: '❌ Waxaa dhacay khalad.', ephemeral: true });
         }
     }
 
@@ -210,63 +221,55 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'kick') {
         const targetUser = interaction.options.getUser('user');
         const targetMember = guild.members.cache.get(targetUser.id);
-        
-        if (!targetMember) return interaction.reply({ content: '❌ Qofkan lagama helin server-ka.', ephemeral: true });
-        if (!targetMember.kickable) return interaction.reply({ content: '❌ Bot-ku awood uma laha inuu kick gareeyo qofkan.', ephemeral: true });
+        if (!targetMember || !targetMember.kickable) return interaction.reply({ content: '❌ Qofkan ma kick gareyn karo.', ephemeral: true });
         
         await targetMember.kick();
-        await interaction.reply({ content: `👢 **${targetUser.tag}** si guul leh ayaa looga kick gareeyey server-ka!`, ephemeral: true });
+        await interaction.reply({ content: `👢 **${targetUser.tag}** si guul leh ayaa looga kick gareeyey!`, ephemeral: true });
     }
 
     // --- /slowmode ---
     if (commandName === 'slowmode') {
         const seconds = interaction.options.getInteger('seconds');
         await channel.setRateLimitPerUser(seconds);
-        await interaction.reply({ content: `⏱️ Slowmode-ka channel-ka waxaa lagu xiray **${seconds}** ilbiriqsi.`, ephemeral: true });
+        await interaction.reply({ content: `⏱️ Slowmode-ka waxaa lagu xiray **${seconds}** ilbiriqsi.`, ephemeral: true });
     }
 
     // --- /offslowmode ---
     if (commandName === 'offslowmode') {
         await channel.setRateLimitPerUser(0);
-        await interaction.reply({ content: '⏱️ Slowmode-ka si guul leh ayaa looga qaaday channel-ka!', ephemeral: true });
+        await interaction.reply({ content: '⏱️ Slowmode-ka si guul leh ayaa looga qaaday!', ephemeral: true });
     }
 });
 
-// 5. Qabashada fariimaha (Spam & DM Auto-Responder)
+// 6. Qabashada fariimaha (Spam & DM Auto-Responder)
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
-    // --- QAYBTA DM-KA (Haddii qofku bot-ka DM ugu soo qoro wax kasta) ---
+    // --- QAYBTA DM-KA ---
     if (message.channel.type === ChannelType.DM) {
         try {
-            // Abuur kaliya badhanka add server-ka sidii aad codsatay
-            const dmRow = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setLabel('Add Server 🔥')
-                        .setStyle(ButtonStyle.Link)
-                        .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot')
-                );
-
-            await message.author.send({
-                content: `Hi ${message.author}\nUse / I'm Working! or Add Your Server 🔍`,
-                components: [dmRow]
-            });
+            const dmRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setLabel('Add Server 🔥')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot')
+            );
+            await message.author.send({ content: `Hi ${message.author}\nUse / I'm Working! or Add Your Server 🔍`, components: [dmRow] });
         } catch (err) {
-            console.error('Ma u diri karo jawaab DM-ka:', err);
+            console.error(err);
         }
-        return; // Jooji halkan si uusan koodhka hoose u raadin server spam
+        return;
     }
 
     // --- QAYBTA SERVER SPAM-KA ---
     if (!message.guild || !message.member) return;
     if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
-    const serverSpamWords = spamWords[message.guild.id] || [];
-    if (serverSpamWords.length === 0) return;
+    const spamDoc = await SpamSchema.findOne({ guildId: message.guild.id });
+    if (!spamDoc || spamDoc.words.length === 0) return;
 
     const contentLower = message.content.toLowerCase();
-    const hasSpam = serverSpamWords.some(word => contentLower.includes(word));
+    const hasSpam = spamDoc.words.some(word => contentLower.includes(word));
 
     if (hasSpam) {
         try {
@@ -274,14 +277,14 @@ client.on('messageCreate', async message => {
             const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`);
             setTimeout(() => warning.delete().catch(() => null), 5000); 
         } catch (err) {
-            console.error('Ma tirtiri karo farriinta:', err);
+            console.error(err);
         }
     }
 });
 
-// 6. Nidaamka soo dhoweynta (Welcome)
+// 7. Nidaamka soo dhoweynta (Welcome)
 client.on('guildMemberAdd', async member => {
-    const config = welcomeConfigs[member.guild.id];
+    const config = await WelcomeSchema.findOne({ guildId: member.guild.id });
     if (!config) return;
 
     const welcomeChannel = member.guild.channels.cache.get(config.channelId);
