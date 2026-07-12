@@ -64,11 +64,11 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('lock')
-        .setDescription('Xir channel-ka aad joogto si aan fariin loogu qori karin (Admins Only).'),
+        .setDescription('Xir channel-ka oo dhan gabi ahaanba (Admins Only).'),
 
     new SlashCommandBuilder()
         .setName('unlock')
-        .setDescription('Foor channel xirnaa si fariin loogu qoro mar kale (Admins Only).'),
+        .setDescription('Fur channel-ka si fariin loogu qoro mar kale (Admins Only).'),
 
     new SlashCommandBuilder()
         .setName('kick')
@@ -198,7 +198,7 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'spam') {
         const inputString = interaction.options.getString('word').toLowerCase().trim();
         
-        // Halkaan waxaan ku kala jareynaa erayada haddii meel bannaan (space) u dhaxayso
+        //分割
         const inputWords = inputString.split(/\s+/).filter(Boolean);
 
         if (inputWords.length === 0) {
@@ -206,7 +206,6 @@ client.on('interactionCreate', async interaction => {
         }
 
         try {
-            // 1. Marka hore soo aqri erayadii horey ugu jiray database-ka server-kan
             const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [guild.id]);
             
             let currentWords = [];
@@ -216,7 +215,6 @@ client.on('interactionCreate', async interaction => {
 
             let newWordsAdded = [];
 
-            // 2. Eray walba mid mid u hubi, haddii uusan ku jirin liiska hore, ku dar
             for (const word of inputWords) {
                 if (!currentWords.includes(word)) {
                     currentWords.push(word);
@@ -224,7 +222,6 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
-            // 3. Haddii ay jiraan erayo cusub oo lagu soo kordhiyey liiska, ku kaydi database-ka
             if (newWordsAdded.length > 0) {
                 if (res.rows.length === 0) {
                     await pgClient.query('INSERT INTO spam (guild_id, words) VALUES ($1, $2)', [guild.id, currentWords]);
@@ -232,7 +229,6 @@ client.on('interactionCreate', async interaction => {
                     await pgClient.query('UPDATE spam SET words = $2 WHERE guild_id = $1', [guild.id, currentWords]);
                 }
                 
-                // Farriinta guusha oo tusaysa erayadii cusbaa ee mid mid loo kala jabiyey
                 await interaction.reply({ 
                     content: `🔒 Eraydan soo socda mid mid ayaa loo kala mamnuucay, laguna kaydiyey Postgres:\n${newWordsAdded.map(w => `• **${w}**`).join('\n')}`, 
                     ephemeral: true 
@@ -247,23 +243,35 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- /lock ---
+    // --- /lock (WAA CUSBOONEYSIIS: KALIYA VIEW AYAA UFURAN) ---
     if (commandName === 'lock') {
         try {
-            await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
-            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray!**', ephemeral: true });
+            await channel.permissionOverwrites.edit(guild.roles.everyone, { 
+                SendMessages: false,             // Ma qori karaan fariin caadi ah
+                CreatePublicThreads: false,      // Ma furi karaan Threads caadi ah (Tani ayaa xal u ah dhibkaaga)
+                CreatePrivateThreads: false,     // Ma furi karaan Threads qarsoon
+                SendMessagesInThreads: false     // Threads dhexdiisa waxba kama qori karaan
+            });
+            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray gabi ahaanba!** Xubnuhu kaliya way daawan karaan (View Only).', ephemeral: true });
         } catch (err) {
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad.', ephemeral: true });
+            console.error(err);
+            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka channel-ka la xirayay.', ephemeral: true });
         }
     }
 
-    // --- /unlock ---
+    // --- /unlock (WAA CUSBOONEYSIIS) ---
     if (commandName === 'unlock') {
         try {
-            await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
-            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!**', ephemeral: true });
+            await channel.permissionOverwrites.edit(guild.roles.everyone, { 
+                SendMessages: null,
+                CreatePublicThreads: null,
+                CreatePrivateThreads: null,
+                SendMessagesInThreads: null
+            });
+            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!** Xubnuhu caadi ahaan ayay wax u qori karaan.', ephemeral: true });
         } catch (err) {
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad.', ephemeral: true });
+            console.error(err);
+            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka channel-ka la furayay.', ephemeral: true });
         }
     }
 
@@ -323,8 +331,6 @@ client.on('messageCreate', async message => {
         if (words.length === 0) return;
 
         const contentLower = message.content.toLowerCase();
-        
-        // Nidaamka hubinta haddii fariinta uu qofku soo qoray ay ku jirto mid ka mid ah erayada la xiray
         const hasSpam = words.some(word => contentLower.includes(word));
 
         if (hasSpam) {
