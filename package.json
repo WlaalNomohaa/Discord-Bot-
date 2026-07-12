@@ -1,14 +1,14 @@
 {
   "name": "sky-bot",
   "version": "1.0.0",
-  "description": "Sky Discord Bot with MongoDB Cloud integration",
+  "description": "Sky Discord Bot with PostgreSQL Railway Integration",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "mongoose": "^8.13.1"
+    "pg": "^8.11.0"
   },
   "author": "",
   "license": "ISC"
