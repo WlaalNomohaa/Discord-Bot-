@@ -59,8 +59,8 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('spam')
-        .setDescription('Ku dar erayada mamnuuca ah ee la tirtirayo (Admins Only).')
-        .addStringOption(option => option.setName('word').setDescription('Qor erayga ama jumlada mamnuuca ah').setRequired(true)),
+        .setDescription('Ku dar erayada mamnuuca ah. Waad kala qori kartaa dhowr eray adoo u dhaxaysiinaya space.')
+        .addStringOption(option => option.setName('word').setDescription('Qor erayada (Tusaale: hw hw siiil)').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('lock')
@@ -174,7 +174,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- /setwelcome (POSTGRESQL SAVING) ---
+    // --- /setwelcome ---
     if (commandName === 'setwelcome') {
         const targetChannel = interaction.options.getChannel('channel');
         const text = interaction.options.getString('text');
@@ -194,27 +194,56 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- /spam (POSTGRESQL SAVING) ---
+    // --- /spam (KALA JABINTA ERAYADA BADAN IYO KAYDINTA POSTGRESQL) ---
     if (commandName === 'spam') {
-        const word = interaction.options.getString('word').toLowerCase().trim();
+        const inputString = interaction.options.getString('word').toLowerCase().trim();
         
+        // Halkaan waxaan ku kala jareynaa erayada haddii meel bannaan (space) u dhaxayso
+        const inputWords = inputString.split(/\s+/).filter(Boolean);
+
+        if (inputWords.length === 0) {
+            return interaction.reply({ content: '❌ Fadlan qor erayada aad rabto inaad mamnuucdo.', ephemeral: true });
+        }
+
         try {
-            // Hubi haddii uu jiro server-kan
+            // 1. Marka hore soo aqri erayadii horey ugu jiray database-ka server-kan
             const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [guild.id]);
             
-            if (res.rows.length === 0) {
-                await pgClient.query('INSERT INTO spam (guild_id, words) VALUES ($1, $2)', [guild.id, [word]]);
-            } else {
-                const existingWords = res.rows[0].words || [];
-                if (!existingWords.includes(word)) {
-                    existingWords.push(word);
-                    await pgClient.query('UPDATE spam SET words = $2 WHERE guild_id = $1', [guild.id, existingWords]);
+            let currentWords = [];
+            if (res.rows.length > 0 && res.rows[0].words) {
+                currentWords = res.rows[0].words;
+            }
+
+            let newWordsAdded = [];
+
+            // 2. Eray walba mid mid u hubi, haddii uusan ku jirin liiska hore, ku dar
+            for (const word of inputWords) {
+                if (!currentWords.includes(word)) {
+                    currentWords.push(word);
+                    newWordsAdded.push(word);
                 }
             }
-            await interaction.reply({ content: `🔒 Erayga **"${word}"** waa la mamnuucay, si rasmiga ahna Postgres ayaa loogu kaydiyey!`, ephemeral: true });
+
+            // 3. Haddii ay jiraan erayo cusub oo lagu soo kordhiyey liiska, ku kaydi database-ka
+            if (newWordsAdded.length > 0) {
+                if (res.rows.length === 0) {
+                    await pgClient.query('INSERT INTO spam (guild_id, words) VALUES ($1, $2)', [guild.id, currentWords]);
+                } else {
+                    await pgClient.query('UPDATE spam SET words = $2 WHERE guild_id = $1', [guild.id, currentWords]);
+                }
+                
+                // Farriinta guusha oo tusaysa erayadii cusbaa ee mid mid loo kala jabiyey
+                await interaction.reply({ 
+                    content: `🔒 Eraydan soo socda mid mid ayaa loo kala mamnuucay, laguna kaydiyey Postgres:\n${newWordsAdded.map(w => `• **${w}**`).join('\n')}`, 
+                    ephemeral: true 
+                });
+            } else {
+                await interaction.reply({ content: 'ℹ️ Dhamaan erayada aad qortay horey ayay ugu jireen liiska erayada mamnuuca ah.', ephemeral: true });
+            }
+
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka xogta la kaydinayay.', ephemeral: true });
+            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka xogta la kala jabiyey ee la kaydinayay.', ephemeral: true });
         }
     }
 
@@ -294,6 +323,8 @@ client.on('messageCreate', async message => {
         if (words.length === 0) return;
 
         const contentLower = message.content.toLowerCase();
+        
+        // Nidaamka hubinta haddii fariinta uu qofku soo qoray ay ku jirto mid ka mid ah erayada la xiray
         const hasSpam = words.some(word => contentLower.includes(word));
 
         if (hasSpam) {
