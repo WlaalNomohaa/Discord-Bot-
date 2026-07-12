@@ -1,27 +1,35 @@
-const { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const mongoose = require('mongoose');
+const { Client: DiscordClient, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client: PGClient } = require('pg');
 
-// 1. ISKU-XIRKA MONGODB DATABASE
-const MONGO_URI = 'mongodb+srv://wlaalsomohaa_db_user:VfQpG1Ob1ybaK0HS@cluster0.3ir9btq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+// 1. ISKU-XIRKA POSTGRESQL (RAILWAY)
+const connectionString = 'postgresql://postgres:uWTuYDFIZxZjVCFeyPsnMANPpBMQKbiV@tokaido.proxy.rlwy.net:43400/railway';
 
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay MongoDB Cloud!'))
-    .catch(err => console.error('❌ Khalad ayaa dhacay marka lala xiriirayay MongoDB:', err));
+const pgClient = new PGClient({
+    connectionString: connectionString,
+    ssl: { rejectUnauthorized: false } // Muhiim u ah isku-xirka Railway dushiisa
+});
 
-// Sameynta naqshada xogta (Schemas)
-const WelcomeSchema = mongoose.model('Welcome', new mongoose.Schema({
-    guildId: { type: String, required: true, unique: true },
-    channelId: String,
-    messageText: String
-}));
-
-const SpamSchema = mongoose.model('Spam', new mongoose.Schema({
-    guildId: { type: String, required: true, unique: true },
-    words: [String]
-}));
+pgClient.connect()
+    .then(() => {
+        console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay Postgres Database (Railway)!');
+        // Abuurista Tables-ka haddii aysan jirin
+        return pgClient.query(`
+            CREATE TABLE IF NOT EXISTS welcome (
+                guild_id TEXT PRIMARY KEY,
+                channel_id TEXT,
+                message_text TEXT
+            );
+            CREATE TABLE IF NOT EXISTS spam (
+                guild_id TEXT PRIMARY KEY,
+                words TEXT[]
+            );
+        `);
+    })
+    .then(() => console.log('✅ Tables-kii database-ka waa ay diyaar yihiin!'))
+    .catch(err => console.error('❌ Khalad ayaa dhacay marka lala xiriirayay Postgres:', err));
 
 // Bilaabista Client-ka Discord-ka
-const client = new Client({
+const client = new DiscordClient({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
@@ -45,7 +53,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('setwelcome')
-        .setDescription('Habee farriinta soo dhoweynta xubnaha cusub (Admins Only).')
+        .setDescription('Habee farriinta soo dhoweynta xubnaha cuzub (Admins Only).')
         .addChannelOption(option => option.setName('channel').setDescription('Dooro channel-ka').setRequired(true).addChannelTypes(ChannelType.GuildText))
         .addStringOption(option => option.setName('text').setDescription('Qor farriinta. Isticmaal {user} iyo {server}').setRequired(true)),
 
@@ -166,35 +174,48 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- /setwelcome (MONGODB SAVING) ---
+    // --- /setwelcome (POSTGRESQL SAVING) ---
     if (commandName === 'setwelcome') {
         const targetChannel = interaction.options.getChannel('channel');
         const text = interaction.options.getString('text');
         
-        await WelcomeSchema.findOneAndUpdate(
-            { guildId: guild.id },
-            { channelId: targetChannel.id, messageText: text },
-            { upsert: true, new: true }
-        );
-        
-        await interaction.reply({ content: `✅ Si guul leh ayaa loo habeeyay oo MongoDB loogu kaydiyey soo dhoweynta! Channel: ${targetChannel}.`, ephemeral: true });
+        try {
+            await pgClient.query(`
+                INSERT INTO welcome (guild_id, channel_id, message_text)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (guild_id)
+                DO UPDATE SET channel_id = $2, message_text = $3;
+            `, [guild.id, targetChannel.id, text]);
+            
+            await interaction.reply({ content: `✅ Si guul leh ayaa PostgreSQL Railway loogu kaydiyey soo dhoweynta! Channel: ${targetChannel}.`, ephemeral: true });
+        } catch (err) {
+            console.error(err);
+            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka xogta la kaydinayay.', ephemeral: true });
+        }
     }
 
-    // --- /spam (MONGODB SAVING) ---
+    // --- /spam (POSTGRESQL SAVING) ---
     if (commandName === 'spam') {
         const word = interaction.options.getString('word').toLowerCase().trim();
         
-        let spamDoc = await SpamSchema.findOne({ guildId: guild.id });
-        if (!spamDoc) {
-            spamDoc = new SpamSchema({ guildId: guild.id, words: [] });
+        try {
+            // Hubi haddii uu jiro server-kan
+            const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [guild.id]);
+            
+            if (res.rows.length === 0) {
+                await pgClient.query('INSERT INTO spam (guild_id, words) VALUES ($1, $2)', [guild.id, [word]]);
+            } else {
+                const existingWords = res.rows[0].words || [];
+                if (!existingWords.includes(word)) {
+                    existingWords.push(word);
+                    await pgClient.query('UPDATE spam SET words = $2 WHERE guild_id = $1', [guild.id, existingWords]);
+                }
+            }
+            await interaction.reply({ content: `🔒 Erayga **"${word}"** waa la mamnuucay, si rasmiga ahna Postgres ayaa loogu kaydiyey!`, ephemeral: true });
+        } catch (err) {
+            console.error(err);
+            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka xogta la kaydinayay.', ephemeral: true });
         }
-        
-        if (!spamDoc.words.includes(word)) {
-            spamDoc.words.push(word);
-            await spamDoc.save();
-        }
-        
-        await interaction.reply({ content: `🔒 Erayga **"${word}"** waa la mamnuucay, si rasmiga ahna MongoDB ayaa loogu kaydiyey!`, ephemeral: true });
     }
 
     // --- /lock ---
@@ -265,36 +286,44 @@ client.on('messageCreate', async message => {
     if (!message.guild || !message.member) return;
     if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
-    const spamDoc = await SpamSchema.findOne({ guildId: message.guild.id });
-    if (!spamDoc || spamDoc.words.length === 0) return;
+    try {
+        const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [message.guild.id]);
+        if (res.rows.length === 0) return;
 
-    const contentLower = message.content.toLowerCase();
-    const hasSpam = spamDoc.words.some(word => contentLower.includes(word));
+        const words = res.rows[0].words || [];
+        if (words.length === 0) return;
 
-    if (hasSpam) {
-        try {
+        const contentLower = message.content.toLowerCase();
+        const hasSpam = words.some(word => contentLower.includes(word));
+
+        if (hasSpam) {
             await message.delete(); 
             const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`);
             setTimeout(() => warning.delete().catch(() => null), 5000); 
-        } catch (err) {
-            console.error(err);
         }
+    } catch (err) {
+        console.error(err);
     }
 });
 
 // 7. Nidaamka soo dhoweynta (Welcome)
 client.on('guildMemberAdd', async member => {
-    const config = await WelcomeSchema.findOne({ guildId: member.guild.id });
-    if (!config) return;
+    try {
+        const res = await pgClient.query('SELECT channel_id, message_text FROM welcome WHERE guild_id = $1', [member.guild.id]);
+        if (res.rows.length === 0) return;
 
-    const welcomeChannel = member.guild.channels.cache.get(config.channelId);
-    if (!welcomeChannel) return;
+        const config = res.rows[0];
+        const welcomeChannel = member.guild.channels.cache.get(config.channel_id);
+        if (!welcomeChannel) return;
 
-    let msg = config.messageText
-        .replace(/{user}/g, `${member}`)
-        .replace(/{server}/g, `${member.guild.name}`);
+        let msg = config.message_text
+            .replace(/{user}/g, `${member}`)
+            .replace(/{server}/g, `${member.guild.name}`);
 
-    welcomeChannel.send(msg);
+        welcomeChannel.send(msg);
+    } catch (err) {
+        console.error(err);
+    }
 });
 
 client.login(process.env.DISCORD_TOKEN);
