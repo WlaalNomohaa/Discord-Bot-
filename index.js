@@ -1,21 +1,17 @@
-const { Client: DiscordClient, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client: DiscordClient, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { Pool } = require('pg');
 
 // 1. ISKU-XIRKA POSTGRESQL (RAILWAY)
-// WAXAAN ISTICMAALNAA "Pool" HALKII "Client" — Pool si otomaatig ah ayuu isu xiraa
-// mar kasta oo connection-ku jabo (xiga: khaladkii /spam iyo /setwelcome sababay)
 const connectionString = 'postgresql://postgres:WJqJPWSoEkhvNpLgkTITbtNRuVxnMWce@interchange.proxy.rlwy.net:59942/railway';
 
 const pgClient = new Pool({
     connectionString: connectionString,
-    ssl: { rejectUnauthorized: false }, // Muhiim u ah isku-xirka Railway dushiisa
+    ssl: { rejectUnauthorized: false },
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000
 });
 
-// Muhiim: Pool wuxuu soo tuuraa 'error' event marka connection idle ah uu jabo.
-// Haddii aan la maarayn, taasi waxay crash gareysaa process-ka oo dhan.
 pgClient.on('error', (err) => {
     console.error('⚠️ Khalad lama filaan ah oo ka yimid Postgres Pool (waa la maareeyay, bot-ku sii socon doonaa):', err.message);
 });
@@ -24,7 +20,6 @@ pgClient.connect()
     .then((c) => {
         c.release();
         console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay Postgres Database (Railway)!');
-        // Abuurista Tables-ka haddii aysan jirin
         return pgClient.query(`
             CREATE TABLE IF NOT EXISTS welcome (
                 guild_id TEXT PRIMARY KEY,
@@ -58,6 +53,26 @@ const client = new DiscordClient({
 
 // Regex lagu ogaanayo links-ka
 const LINK_REGEX = /(https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
+
+// ====== MIDABADA EMBED-KA (BRAND COLORS) ======
+const COLORS = {
+    success: 0x57F287,
+    error:   0xED4245,
+    warning: 0xFEE75C,
+    info:    0x5865F2,
+    brand:   0x8E5CFF
+};
+const FOOTER = { text: 'Sky 🌟 | Server Management', };
+
+// Helper: samee embed si degdeg ah
+const makeEmbed = ({ color = COLORS.brand, title, description, fields, thumbnail } = {}) => {
+    const embed = new EmbedBuilder().setColor(color).setFooter(FOOTER).setTimestamp();
+    if (title) embed.setTitle(title);
+    if (description) embed.setDescription(description);
+    if (fields) embed.addFields(fields);
+    if (thumbnail) embed.setThumbnail(thumbnail);
+    return embed;
+};
 
 // 2. Diyaarinta dhamaan amarrada (Slash Commands)
 const commands = [
@@ -131,13 +146,13 @@ const getButtonsRow = () => {
         );
 };
 
-// Row-ka button-ka Unmute ee ku lifaaqan fariinta antilinks
 const getUnmuteRow = (userId) => {
     return new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
                 .setCustomId(`unmute_${userId}`)
                 .setLabel('Unmute')
+                .setEmoji('🔓')
                 .setStyle(ButtonStyle.Success)
         );
 };
@@ -163,8 +178,14 @@ client.on('guildCreate', async (guild) => {
         const owner = await guild.fetchOwner();
         if (!owner) return;
 
+        const embed = makeEmbed({
+            color: COLORS.brand,
+            title: `Hi ${owner.user.username} 👋`,
+            description: `Mahadsanid inaad **Sky 🌟** ku darto server-kaaga **${guild.name}**!\n\nGuji buttons-ka hoose si aad u aragto amarrada ama u hesho support.`
+        }).setThumbnail(client.user.displayAvatarURL());
+
         await owner.send({
-            content: `Hi ${owner.user}\nAdd Your Server 🔍\n\nClick the buttons below to add the bot or get support:`,
+            embeds: [embed],
             components: [getButtonsRow()]
         });
     } catch (err) {
@@ -180,17 +201,26 @@ client.on('interactionCreate', async interaction => {
         if (!interaction.customId.startsWith('unmute_')) return;
 
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha ayaa isticmaali kara button-kan.', ephemeral: true });
+            return interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha ayaa isticmaali kara button-kan.' })],
+                ephemeral: true
+            });
         }
 
         const targetId = interaction.customId.replace('unmute_', '');
         try {
             const targetMember = await interaction.guild.members.fetch(targetId);
             await targetMember.timeout(null, 'Unmute laga sameeyay admin');
-            await interaction.reply({ content: `🔓 **${targetMember.user.tag}** waa laga qaaday mute-ka!`, ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.success, title: '🔓 Unmute', description: `**${targetMember.user.tag}** waa laga qaaday mute-ka!` })],
+                ephemeral: true
+            });
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka qofka la unmute gareynayay (waxa laga yaabaa inuu maqan yahay server-ka).', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka qofka la unmute gareynayay (waxa laga yaabaa inuu maqan yahay server-ka).' })],
+                ephemeral: true
+            });
         }
         return;
     }
@@ -200,42 +230,67 @@ client.on('interactionCreate', async interaction => {
 
     // --- /help ---
     if (commandName === 'help') {
-        const helpMessage = 
-            `Hi ${user} I'm Sky Bot Information 👇\n\n` +
-            `/setwelcome - Samey Welcome Message\n` +
-            `/clean - Ka tirtir channel-ka farriimaha (1-100)\n` +
-            `/kick - User Kick Gareey\n` +
-            `/lock - Xir Channel-ka\n` +
-            `/unlock - Fur Channel-ka\n` +
-            `/slowmode - Saar daqiiqado Channel-ka\n` +
-            `/offslowmode - Ka qaad daqiiqadaha\n` +
-            `/spam - Xir Hadalada Xun Xun\n` +
-            `/antilinks - Shaqaali/Jooji ilaalinta Links-ka\n\n` +
-            `Waqti dhow saaxiib! Waad ku mahadsantahay doorashada aad i dooratay 🔥`;
+        const helpEmbed = makeEmbed({
+            color: COLORS.brand,
+            title: `👋 Hi ${user.username}, I'm Sky Bot`,
+            description: 'Waa kuwan amarrada aad isticmaali karto:',
+            fields: [
+                { name: '📢 /setwelcome', value: 'Samey Welcome Message', inline: true },
+                { name: '🧹 /clean', value: 'Ka tirtir farriimaha (1-100)', inline: true },
+                { name: '👢 /kick', value: 'User Kick Gareey', inline: true },
+                { name: '🔒 /lock', value: 'Xir Channel-ka', inline: true },
+                { name: '🔓 /unlock', value: 'Fur Channel-ka', inline: true },
+                { name: '⏱️ /slowmode', value: 'Saar daqiiqado Channel-ka', inline: true },
+                { name: '⏱️ /offslowmode', value: 'Ka qaad daqiiqadaha', inline: true },
+                { name: '🚫 /spam', value: 'Xir Hadalada Xun Xun', inline: true },
+                { name: '🔗 /antilinks', value: 'Shaqaali/Jooji ilaalinta Links-ka', inline: true }
+            ]
+        }).setThumbnail(client.user.displayAvatarURL())
+          .setDescription('Waqti dhow saaxiib! Waad ku mahadsantahay doorashada aad i dooratay 🔥');
 
         try {
-            await user.send({ content: helpMessage, components: [getButtonsRow()] });
-            await interaction.reply({ content: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga!', ephemeral: true });
+            await user.send({ embeds: [helpEmbed], components: [getButtonsRow()] });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.success, description: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga!' })],
+                ephemeral: true
+            });
         } catch (err) {
-            await interaction.reply({ content: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.' })],
+                ephemeral: true
+            });
         }
         return;
     }
 
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ayaa isticmaali kara amarradan.', ephemeral: true });
+        return interaction.reply({
+            embeds: [makeEmbed({ color: COLORS.error, description: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ayaa isticmaali kara amarradan.' })],
+            ephemeral: true
+        });
     }
 
     // --- /clean ---
     if (commandName === 'clean') {
         const amount = interaction.options.getInteger('amount');
-        if (amount < 1 || amount > 100) return interaction.reply({ content: '❌ Fadlan dooro tiro u dhaxeysa 1 ilaa 100 farriimood.', ephemeral: true });
+        if (amount < 1 || amount > 100) {
+            return interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.warning, description: '⚠️ Fadlan dooro tiro u dhaxeysa 1 ilaa 100 farriimood.' })],
+                ephemeral: true
+            });
+        }
 
         try {
             const deleted = await channel.bulkDelete(amount, true);
-            await interaction.reply({ content: `🧹 Si guul leh ayaa channel-ka looga tirtiray **${deleted.size}** farriimood!`, ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.success, title: '🧹 Clean', description: `Si guul leh ayaa channel-ka looga tirtiray **${deleted.size}** farriimood!` })],
+                ephemeral: true
+            });
         } catch (err) {
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay.' })],
+                ephemeral: true
+            });
         }
     }
 
@@ -243,7 +298,7 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'setwelcome') {
         const targetChannel = interaction.options.getChannel('channel');
         const text = interaction.options.getString('text');
-        
+
         try {
             await pgClient.query(`
                 INSERT INTO welcome (guild_id, channel_id, message_text)
@@ -251,26 +306,43 @@ client.on('interactionCreate', async interaction => {
                 ON CONFLICT (guild_id)
                 DO UPDATE SET channel_id = $2, message_text = $3;
             `, [guild.id, targetChannel.id, text]);
-            
-            await interaction.reply({ content: `✅ Si guul leh ayaa PostgreSQL Railway loogu kaydiyey soo dhoweynta! Channel: ${targetChannel}.`, ephemeral: true });
+
+            await interaction.reply({
+                embeds: [makeEmbed({
+                    color: COLORS.success,
+                    title: '✅ Welcome Message',
+                    description: `Si guul leh ayaa loo kaydiyey soo dhoweynta!`,
+                    fields: [
+                        { name: 'Channel', value: `${targetChannel}`, inline: true },
+                        { name: 'Farriinta', value: text }
+                    ]
+                })],
+                ephemeral: true
+            });
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka xogta la kaydinayay.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka xogta la kaydinayay.' })],
+                ephemeral: true
+            });
         }
     }
 
-    // --- /spam (KALA JABINTA ERAYADA BADAN IYO KAYDINTA POSTGRESQL) ---
+    // --- /spam ---
     if (commandName === 'spam') {
         const inputString = interaction.options.getString('word').toLowerCase().trim();
         const inputWords = inputString.split(/\s+/).filter(Boolean);
 
         if (inputWords.length === 0) {
-            return interaction.reply({ content: '❌ Fadlan qor erayada aad rabto inaad mamnuucdo.', ephemeral: true });
+            return interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.warning, description: '⚠️ Fadlan qor erayada aad rabto inaad mamnuucdo.' })],
+                ephemeral: true
+            });
         }
 
         try {
             const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [guild.id]);
-            
+
             let currentWords = [];
             if (res.rows.length > 0 && res.rows[0].words) {
                 currentWords = res.rows[0].words;
@@ -291,50 +363,72 @@ client.on('interactionCreate', async interaction => {
                 } else {
                     await pgClient.query('UPDATE spam SET words = $2 WHERE guild_id = $1', [guild.id, currentWords]);
                 }
-                
-                await interaction.reply({ 
-                    content: `🔒 Eraydan soo socda mid mid ayaa loo kala mamnuucay, laguna kaydiyey Postgres:\n${newWordsAdded.map(w => `• **${w}**`).join('\n')}`, 
-                    ephemeral: true 
+
+                await interaction.reply({
+                    embeds: [makeEmbed({
+                        color: COLORS.success,
+                        title: '🔒 Spam Words',
+                        description: `Eraydan soo socda mid mid ayaa loo kala mamnuucay, laguna kaydiyey Postgres:\n${newWordsAdded.map(w => `• **${w}**`).join('\n')}`
+                    })],
+                    ephemeral: true
                 });
             } else {
-                await interaction.reply({ content: 'ℹ️ Dhamaan erayada aad qortay horey ayay ugu jireen liiska erayada mamnuuca ah.', ephemeral: true });
+                await interaction.reply({
+                    embeds: [makeEmbed({ color: COLORS.info, description: 'ℹ️ Dhamaan erayada aad qortay horey ayay ugu jireen liiska erayada mamnuuca ah.' })],
+                    ephemeral: true
+                });
             }
 
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka xogta la kala jabiyey ee la kaydinayay.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka xogta la kala jabiyey ee la kaydinayay.' })],
+                ephemeral: true
+            });
         }
     }
 
     // --- /lock ---
     if (commandName === 'lock') {
         try {
-            await channel.permissionOverwrites.edit(guild.roles.everyone, { 
+            await channel.permissionOverwrites.edit(guild.roles.everyone, {
                 SendMessages: false,
                 CreatePublicThreads: false,
                 CreatePrivateThreads: false,
                 SendMessagesInThreads: false
             });
-            await interaction.reply({ content: '🔒 **Channel-kan waa la xiray gabi ahaanba!** Xubnuhu kaliya way daawan karaan (View Only).', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.warning, title: '🔒 Locked', description: '**Channel-kan waa la xiray gabi ahaanba!** Xubnuhu kaliya way daawan karaan (View Only).' })],
+                ephemeral: true
+            });
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka channel-ka la xirayay.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Waxaa dhacay khalad marka channel-ka la xirayay.' })],
+                ephemeral: true
+            });
         }
     }
 
     // --- /unlock ---
     if (commandName === 'unlock') {
         try {
-            await channel.permissionOverwrites.edit(guild.roles.everyone, { 
+            await channel.permissionOverwrites.edit(guild.roles.everyone, {
                 SendMessages: null,
                 CreatePublicThreads: null,
                 CreatePrivateThreads: null,
                 SendMessagesInThreads: null
             });
-            await interaction.reply({ content: '🔓 **Channel-kan waa la furay!** Xubnuhu caadi ahaan ayay wax u qori karaan.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.success, title: '🔓 Unlocked', description: '**Channel-kan waa la furay!** Xubnuhu caadi ahaan ayay wax u qori karaan.' })],
+                ephemeral: true
+            });
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Waxaa dhacay khalad marka channel-ka la furayay.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Waxaa dhacay khalad marka channel-ka la furayay.' })],
+                ephemeral: true
+            });
         }
     }
 
@@ -342,23 +436,37 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'kick') {
         const targetUser = interaction.options.getUser('user');
         const targetMember = guild.members.cache.get(targetUser.id);
-        if (!targetMember || !targetMember.kickable) return interaction.reply({ content: '❌ Qofkan ma kick gareyn karo.', ephemeral: true });
-        
+        if (!targetMember || !targetMember.kickable) {
+            return interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Qofkan ma kick gareyn karo.' })],
+                ephemeral: true
+            });
+        }
+
         await targetMember.kick();
-        await interaction.reply({ content: `👢 **${targetUser.tag}** si guul leh ayaa looga kick gareeyey!`, ephemeral: true });
+        await interaction.reply({
+            embeds: [makeEmbed({ color: COLORS.success, title: '👢 Kicked', description: `**${targetUser.tag}** si guul leh ayaa looga kick gareeyey!` })],
+            ephemeral: true
+        });
     }
 
     // --- /slowmode ---
     if (commandName === 'slowmode') {
         const seconds = interaction.options.getInteger('seconds');
         await channel.setRateLimitPerUser(seconds);
-        await interaction.reply({ content: `⏱️ Slowmode-ka waxaa lagu xiray **${seconds}** ilbiriqsi.`, ephemeral: true });
+        await interaction.reply({
+            embeds: [makeEmbed({ color: COLORS.info, title: '⏱️ Slowmode', description: `Slowmode-ka waxaa lagu xiray **${seconds}** ilbiriqsi.` })],
+            ephemeral: true
+        });
     }
 
     // --- /offslowmode ---
     if (commandName === 'offslowmode') {
         await channel.setRateLimitPerUser(0);
-        await interaction.reply({ content: '⏱️ Slowmode-ka si guul leh ayaa looga qaaday!', ephemeral: true });
+        await interaction.reply({
+            embeds: [makeEmbed({ color: COLORS.info, title: '⏱️ Slowmode', description: 'Slowmode-ka si guul leh ayaa looga qaaday!' })],
+            ephemeral: true
+        });
     }
 
     // --- /antilinks ---
@@ -375,14 +483,21 @@ client.on('interactionCreate', async interaction => {
             `, [guild.id, enabled]);
 
             await interaction.reply({
-                content: enabled
-                    ? '✅ **Antilinks waa la shaqaaliyay!** Hadda cidkasta oo link dhiga (xubno aan admin ahayn) waa la mute gareynayaa.'
-                    : '🛑 **Antilinks waa la joojiyay.**',
+                embeds: [makeEmbed({
+                    color: enabled ? COLORS.success : COLORS.warning,
+                    title: '🔗 Antilinks',
+                    description: enabled
+                        ? '✅ **Antilinks waa la shaqaaliyay!** Hadda cidkasta oo link dhiga (xubno aan admin ahayn) waa la mute gareynayaa.'
+                        : '🛑 **Antilinks waa la joojiyay.**'
+                })],
                 ephemeral: true
             });
         } catch (err) {
             console.error(err);
-            await interaction.reply({ content: '❌ Khalad ayaa dhacay marka antilinks la habaynayay.', ephemeral: true });
+            await interaction.reply({
+                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka antilinks la habaynayay.' })],
+                ephemeral: true
+            });
         }
     }
 });
@@ -400,7 +515,13 @@ client.on('messageCreate', async message => {
                     .setStyle(ButtonStyle.Link)
                     .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot')
             );
-            await message.author.send({ content: `Hi ${message.author}\nUse / I'm Working! or Add Your Server 🔍`, components: [dmRow] });
+            const dmEmbed = makeEmbed({
+                color: COLORS.brand,
+                title: `Hi ${message.author.username} 👋`,
+                description: `Use **/** commands I'm Working! or Add Your Server 🔍`
+            }).setThumbnail(client.user.displayAvatarURL());
+
+            await message.author.send({ embeds: [dmEmbed], components: [dmRow] });
         } catch (err) {
             console.error(err);
         }
@@ -420,20 +541,26 @@ client.on('messageCreate', async message => {
             await message.delete().catch(() => null);
 
             if (message.member.moderatable) {
-                await message.member.timeout(10 * 60 * 1000, 'Link dhigay oo aan la ogolayn').catch(() => null); // 10 daqiiqo mute
+                await message.member.timeout(10 * 60 * 1000, 'Link dhigay oo aan la ogolayn').catch(() => null);
             }
 
+            const warnEmbed = makeEmbed({
+                color: COLORS.warning,
+                title: '⚠️ Link La Ogola Maahan',
+                description: `${message.author} Fadlan Kama OgoLa Links Badan ⚠️\n\nWaxaa lagaa saaray hadal 10 daqiiqo ah.`
+            }).setThumbnail(message.author.displayAvatarURL());
+
             await message.channel.send({
-                content: `${message.author} Fadlan Kama OgoLa Links Badan ⚠️`,
+                embeds: [warnEmbed],
                 components: [getUnmuteRow(message.author.id)]
             });
-            return; // ha sii socon spam check-ga
+            return;
         }
     } catch (err) {
         console.error(err);
     }
 
-    // --- QAYBTA SERVER SPAM-KA (erayada mamnuuca ah) ---
+    // --- QAYBTA SERVER SPAM-KA ---
     try {
         const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [message.guild.id]);
         if (res.rows.length === 0) return;
@@ -445,9 +572,13 @@ client.on('messageCreate', async message => {
         const hasSpam = words.some(word => contentLower.includes(word));
 
         if (hasSpam) {
-            await message.delete(); 
-            const warning = await message.channel.send(`⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`);
-            setTimeout(() => warning.delete().catch(() => null), 5000); 
+            await message.delete();
+            const spamEmbed = makeEmbed({
+                color: COLORS.warning,
+                description: `⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`
+            });
+            const warning = await message.channel.send({ embeds: [spamEmbed] });
+            setTimeout(() => warning.delete().catch(() => null), 5000);
         }
     } catch (err) {
         console.error(err);
@@ -468,13 +599,19 @@ client.on('guildMemberAdd', async member => {
             .replace(/{user}/g, `${member}`)
             .replace(/{server}/g, `${member.guild.name}`);
 
-        welcomeChannel.send(msg);
+        const welcomeEmbed = makeEmbed({
+            color: COLORS.brand,
+            title: `🎉 Welcome to ${member.guild.name}!`,
+            description: msg
+        }).setThumbnail(member.user.displayAvatarURL());
+
+        welcomeChannel.send({ embeds: [welcomeEmbed] });
     } catch (err) {
         console.error(err);
     }
 });
 
-// 8. Ilaalinta process-ka: ha u oggolaan khaladaad aan la sugin inay bot-ka crash gareeyaan
+// 8. Ilaalinta process-ka
 process.on('unhandledRejection', (err) => {
     console.error('⚠️ Unhandled Rejection (waa la maareeyay):', err);
 });
