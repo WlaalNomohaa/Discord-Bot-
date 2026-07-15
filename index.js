@@ -1,8 +1,7 @@
-const { Client, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { Pool } = require('pg');
 
-// 1. ISKU-XIRKA DATABASE (Isticmaal environment variable)
-const pool = new Pool({
+const pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
 });
@@ -11,72 +10,39 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers]
 });
 
-// 2. DIWAANGELINTA COMMANDS
+// DIWAANGELINTA AMARADA OO DHAN (Hubi in magacyadu aysan lahayn meel bannaan/space)
 const commands = [
     new SlashCommandBuilder().setName('help').setDescription('Macluumaadka bot-ka.'),
-    new SlashCommandBuilder().setName('clean').setDescription('Tirtir farriimo (1-100)')
-        .addIntegerOption(o => o.setName('amount').setDescription('Tiro').setRequired(true)),
-    new SlashCommandBuilder().setName('antlinks').setDescription('Tirtir link-yada (On/Off)')
-        .addStringOption(o => o.setName('status').addChoices({name: 'On', value: 'on'}, {name: 'Off', value: 'off'}).setRequired(true)),
+    new SlashCommandBuilder().setName('clean').setDescription('Tirtir farriimo')
+        .addIntegerOption(o => o.setName('amount').setDescription('Tirada 1-100').setRequired(true)),
     new SlashCommandBuilder().setName('setwelcome').setDescription('Soo dhoweyn')
-        .addChannelOption(o => o.setName('channel').setRequired(true))
-        .addStringOption(o => o.setName('text').setRequired(true)),
-    new SlashCommandBuilder().setName('lock').setDescription('Xir channel-ka.'),
-    new SlashCommandBuilder().setName('unlock').setDescription('Fur channel-ka.')
+        .addChannelOption(o => o.setName('channel').setDescription('Dooro channel').setRequired(true))
+        .addStringOption(o => o.setName('text').setDescription('Fariin {user}').setRequired(true)),
+    new SlashCommandBuilder().setName('antlinks').setDescription('Tirtir link-yada')
+        .addStringOption(o => o.setName('status').setDescription('Dooro On ama Off').addChoices({name: 'On', value: 'on'}, {name: 'Off', value: 'off'}).setRequired(true)),
+    new SlashCommandBuilder().setName('lock').setDescription('Xir channel-ka'),
+    new SlashCommandBuilder().setName('unlock').setDescription('Fur channel-ka')
 ].map(c => c.toJSON());
 
-// 3. READY EVENT
+// HADDII KHALADKU U GUDBI WAAYO, BEDDEL REST API-GA SIDAAN:
 client.once('ready', async () => {
-    console.log(`✅ Sky 🌟 waa online: ${client.user.tag}`);
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+    console.log(`✅ Bot-ka wuu socdaa: ${client.user.tag}`);
+    // Waxaad u baahan tahay inaad hubiso in DISCORD_TOKEN uu yahay mid sax ah oo Environment Variable ah
 });
 
-// 4. MESSAGE HANDLER (Spam & AntiLinks)
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
-    if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-    // Anti-Links Logic
-    const linkRegex = /https?:\/\/[^\s]+/gi;
-    try {
-        const res = await pool.query('SELECT antlinks FROM settings WHERE guild_id = $1', [message.guild.id]);
-        if (res.rows.length > 0 && res.rows[0].antlinks === 'on' && linkRegex.test(message.content)) {
-            await message.delete();
-            return message.channel.send(`⚠️ ${message.author}, Link-yada lama oggola!`).then(m => setTimeout(() => m.delete(), 3000));
-        }
-    } catch (e) { console.error(e); }
-});
-
-// 5. INTERACTION HANDLER (Amarrada)
+// Qaybta interactionCreate waa ay saxan tahay, laakiin hubi inaad ku darto try/catch
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
-
+    
     try {
         if (interaction.commandName === 'antlinks') {
             const status = interaction.options.getString('status');
-            await pool.query('INSERT INTO settings (guild_id, antlinks) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET antlinks = $2', [interaction.guild.id, status]);
-            await interaction.reply({ content: `✅ Anti-Links hadda waa ${status}`, ephemeral: true });
+            await pgPool.query('INSERT INTO settings (guild_id, antlinks) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET antlinks = $2', [interaction.guild.id, status]);
+            await interaction.reply({ content: `✅ Anti-Links hadda waa **${status}**!`, ephemeral: true });
         }
-        
-        if (interaction.commandName === 'clean') {
-            const amount = interaction.options.getInteger('amount');
-            const deleted = await interaction.channel.bulkDelete(amount, true);
-            await interaction.reply({ content: `🧹 Waxaa la tirtiray ${deleted.size} farriimood.`, ephemeral: true });
-        }
-
-        if (interaction.commandName === 'lock') {
-            await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
-            await interaction.reply({ content: '🔒 Channel-kan waa la xiray.', ephemeral: true });
-        }
-
-        if (interaction.commandName === 'unlock') {
-            await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
-            await interaction.reply({ content: '🔓 Channel-kan waa la furay.', ephemeral: true });
-        }
-    } catch (e) {
-        console.error(e);
-        if (!interaction.replied) await interaction.reply({ content: '❌ Khalad ayaa dhacay.', ephemeral: true });
+        // Ku dar qaybaha kale halkan...
+    } catch (err) {
+        console.error('Khalad dhacay:', err);
     }
 });
 
