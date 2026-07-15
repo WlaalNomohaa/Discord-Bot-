@@ -1,16 +1,28 @@
 const { Client: DiscordClient, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { Client: PGClient } = require('pg');
+const { Pool } = require('pg');
 
 // 1. ISKU-XIRKA POSTGRESQL (RAILWAY)
+// WAXAAN ISTICMAALNAA "Pool" HALKII "Client" — Pool si otomaatig ah ayuu isu xiraa
+// mar kasta oo connection-ku jabo (xiga: khaladkii /spam iyo /setwelcome sababay)
 const connectionString = 'postgresql://postgres:uWTuYDFIZxZjVCFeyPsnMANPpBMQKbiV@tokaido.proxy.rlwy.net:43400/railway';
 
-const pgClient = new PGClient({
+const pgClient = new Pool({
     connectionString: connectionString,
-    ssl: { rejectUnauthorized: false } // Muhiim u ah isku-xirka Railway dushiisa
+    ssl: { rejectUnauthorized: false }, // Muhiim u ah isku-xirka Railway dushiisa
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000
+});
+
+// Muhiim: Pool wuxuu soo tuuraa 'error' event marka connection idle ah uu jabo.
+// Haddii aan la maarayn, taasi waxay crash gareysaa process-ka oo dhan.
+pgClient.on('error', (err) => {
+    console.error('⚠️ Khalad lama filaan ah oo ka yimid Postgres Pool (waa la maareeyay, bot-ku sii socon doonaa):', err.message);
 });
 
 pgClient.connect()
-    .then(() => {
+    .then((c) => {
+        c.release();
         console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay Postgres Database (Railway)!');
         // Abuurista Tables-ka haddii aysan jirin
         return pgClient.query(`
@@ -462,5 +474,12 @@ client.on('guildMemberAdd', async member => {
     }
 });
 
+// 8. Ilaalinta process-ka: ha u oggolaan khaladaad aan la sugin inay bot-ka crash gareeyaan
+process.on('unhandledRejection', (err) => {
+    console.error('⚠️ Unhandled Rejection (waa la maareeyay):', err);
+});
+process.on('uncaughtException', (err) => {
+    console.error('⚠️ Uncaught Exception (waa la maareeyay):', err);
+});
+
 client.login(process.env.DISCORD_TOKEN);
-          
