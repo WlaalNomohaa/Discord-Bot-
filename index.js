@@ -4,7 +4,7 @@ const { Pool } = require('pg');
 // 1. ISKU-XIRKA POSTGRESQL (RAILWAY)
 // WAXAAN ISTICMAALNAA "Pool" HALKII "Client" — Pool si otomaatig ah ayuu isu xiraa
 // mar kasta oo connection-ku jabo (xiga: khaladkii /spam iyo /setwelcome sababay)
-const connectionString = 'postgresql://postgres:uWTuYDFIZxZjVCFeyPsnMANPpBMQKbiV@tokaido.proxy.rlwy.net:43400/railway';
+const connectionString = 'postgresql://postgres:WJqJPWSoEkhvNpLgkTITbtNRuVxnMWce@interchange.proxy.rlwy.net:59942/railway';
 
 const pgClient = new Pool({
     connectionString: connectionString,
