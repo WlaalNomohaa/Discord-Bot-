@@ -1,8 +1,21 @@
-const { Client: DiscordClient, GatewayIntentBits, ActivityType, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const {
+    Client: DiscordClient,
+    GatewayIntentBits,
+    ActivityType,
+    REST,
+    Routes,
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    ChannelType,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    EmbedBuilder
+} = require('discord.js');
 const { Pool } = require('pg');
 
-// 1. ISKU-XIRKA POSTGRESQL (RAILWAY)
-const connectionString = 'postgresql://postgres:WJqJPWSoEkhvNpLgkTITbtNRuVxnMWce@interchange.proxy.rlwy.net:59942/railway';
+// ================== 1. DATABASE (POSTGRESQL) ==================
+const connectionString = process.env.DATABASE_URL;
 
 const pgClient = new Pool({
     connectionString: connectionString,
@@ -13,58 +26,59 @@ const pgClient = new Pool({
 });
 
 pgClient.on('error', (err) => {
-    console.error('⚠️ Khalad lama filaan ah oo ka yimid Postgres Pool (waa la maareeyay, bot-ku sii socon doonaa):', err.message);
+    console.error('⚠️ Khalad lama filaan ah oo ka yimid Postgres Pool (waa la maareeyay):', err.message);
 });
 
 pgClient.connect()
     .then((c) => {
         c.release();
-        console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay Postgres Database (Railway)!');
+        console.log('🎯 Si guul leh ayuu bot-ku ugu xirmay Postgres Database!');
         return pgClient.query(`
-            CREATE TABLE IF NOT EXISTS welcome (
+            CREATE TABLE IF NOT EXISTS ticket_config (
                 guild_id TEXT PRIMARY KEY,
-                channel_id TEXT,
-                message_text TEXT
+                panel_channel_id TEXT,
+                panel_message TEXT,
+                button_label TEXT,
+                open_message TEXT,
+                mention_role_id TEXT,
+                category_id TEXT,
+                log_channel_id TEXT,
+                ticket_counter INTEGER DEFAULT 0
             );
-            CREATE TABLE IF NOT EXISTS spam (
-                guild_id TEXT PRIMARY KEY,
-                words TEXT[]
-            );
-            CREATE TABLE IF NOT EXISTS antilinks (
-                guild_id TEXT PRIMARY KEY,
-                enabled BOOLEAN DEFAULT true
+            CREATE TABLE IF NOT EXISTS tickets (
+                channel_id TEXT PRIMARY KEY,
+                guild_id TEXT,
+                opener_id TEXT,
+                claimed_by TEXT,
+                status TEXT DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT NOW()
             );
         `);
     })
     .then(() => console.log('✅ Tables-kii database-ka waa ay diyaar yihiin!'))
     .catch(err => console.error('❌ Khalad ayaa dhacay marka lala xiriirayay Postgres:', err));
 
-// Bilaabista Client-ka Discord-ka
+// ================== 2. DISCORD CLIENT ==================
 const client = new DiscordClient({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.DirectMessages
+        GatewayIntentBits.GuildMembers
     ],
     partials: ['Channel']
 });
 
-// Regex lagu ogaanayo links-ka
-const LINK_REGEX = /(https?:\/\/|www\.|discord\.gg\/|discord\.com\/invite\/)\S+/i;
-
-// ====== MIDABADA EMBED-KA (BRAND COLORS) ======
+// ================== COLORS & EMBED HELPER ==================
 const COLORS = {
     success: 0x57F287,
-    error:   0xED4245,
+    error: 0xED4245,
     warning: 0xFEE75C,
-    info:    0x5865F2,
-    brand:   0x8E5CFF
+    info: 0x5865F2,
+    brand: 0x8E5CFF
 };
-const FOOTER = { text: 'Sky 🌟 | Server Management', };
+const FOOTER = { text: 'Ticket System 🎫' };
 
-// Helper: samee embed si degdeg ah
 const makeEmbed = ({ color = COLORS.brand, title, description, fields, thumbnail } = {}) => {
     const embed = new EmbedBuilder().setColor(color).setFooter(FOOTER).setTimestamp();
     if (title) embed.setTitle(title);
@@ -74,93 +88,92 @@ const makeEmbed = ({ color = COLORS.brand, title, description, fields, thumbnail
     return embed;
 };
 
-// 2. Diyaarinta dhamaan amarrada (Slash Commands)
+// ================== SLASH COMMANDS ==================
 const commands = [
     new SlashCommandBuilder()
-        .setName('help')
-        .setDescription('Wuxuu DM kuugu soo dirayaa macluumaadka bot-ka iyo amarradiisa.'),
-
-    new SlashCommandBuilder()
-        .setName('clean')
-        .setDescription('Ka tirtir channel-ka dhowr farriimood hal mara (Admins Only).')
-        .addIntegerOption(option => option.setName('amount').setDescription('Inta farriimood oo la tirtirayo (1-100)').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('setwelcome')
-        .setDescription('Habee farriinta soo dhoweynta xubnaha cuzub (Admins Only).')
-        .addChannelOption(option => option.setName('channel').setDescription('Dooro channel-ka').setRequired(true).addChannelTypes(ChannelType.GuildText))
-        .addStringOption(option => option.setName('text').setDescription('Qor farriinta. Isticmaal {user} iyo {server}').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('spam')
-        .setDescription('Ku dar erayada mamnuuca ah. Waad kala qori kartaa dhowr eray adoo u dhaxaysiinaya space.')
-        .addStringOption(option => option.setName('word').setDescription('Qor erayada (Tusaale: hw hw siiil)').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('lock')
-        .setDescription('Xir channel-ka oo dhan gabi ahaanba (Admins Only).'),
-
-    new SlashCommandBuilder()
-        .setName('unlock')
-        .setDescription('Fur channel-ka si fariin loogu qoro mar kale (Admins Only).'),
-
-    new SlashCommandBuilder()
-        .setName('kick')
-        .setDescription('Server-ka ka saar xubin gaar ah (Admins Only).')
-        .addUserOption(option => option.setName('user').setDescription('Dooro qofka la kick gareynayo').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('slowmode')
-        .setDescription('Ku xir slowmode channel-ka aad joogto (Admins Only).')
-        .addIntegerOption(option => option.setName('seconds').setDescription('Inta ilbiriqsi oo qofku sugayo').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('offslowmode')
-        .setDescription('Ka qaad slowmode-ka channel-ka aad joogto (Admins Only).'),
-
-    new SlashCommandBuilder()
-        .setName('antilinks')
-        .setDescription('Shaqaali/Jooji ilaalinta Links-ka server-ka (Admins Only).')
-        .addStringOption(option =>
-            option.setName('status')
-                .setDescription('Dooro on ama off')
+        .setName('ticketsetup')
+        .setDescription('Diyaari Nidaamka Ticket-ka server-kan (Admins Only).')
+        .addChannelOption(option =>
+            option.setName('channel')
+                .setDescription('Channel-ka lagu dhigayo Panel-ka')
                 .setRequired(true)
-                .addChoices(
-                    { name: 'on', value: 'on' },
-                    { name: 'off', value: 'off' }
-                )
-        )
+                .addChannelTypes(ChannelType.GuildText))
+        .addStringOption(option =>
+            option.setName('message')
+                .setDescription('Farriinta ku qoran Panel-ka (waxa la arki doono)')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('button_text')
+                .setDescription('Qoraalka Button-ka (Tusaale: Open Ticket)')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('open_message')
+                .setDescription('Farriinta la diro marka Channel-ka Ticket-ka la furo. Isticmaal {user}')
+                .setRequired(true))
+        .addRoleOption(option =>
+            option.setName('mention_role')
+                .setDescription('Role-ka la mention gareynayo marka ticket la furo (Tusaale: @Administrator)')
+                .setRequired(true))
+        .addChannelOption(option =>
+            option.setName('category')
+                .setDescription('Category-ga tickets-ku ku samaysmi doonaan (ikhtiyaari)')
+                .setRequired(false)
+                .addChannelTypes(ChannelType.GuildCategory))
+        .addChannelOption(option =>
+            option.setName('log_channel')
+                .setDescription('Channel-ka logs-ka tickets-ka (ikhtiyaari)')
+                .setRequired(false)
+                .addChannelTypes(ChannelType.GuildText)),
+
+    new SlashCommandBuilder()
+        .setName('ticketclose')
+        .setDescription('Xir ticket-ka aad hadda ku jirto (Admins Only).'),
+
+    new SlashCommandBuilder()
+        .setName('ticketadd')
+        .setDescription('Ku dar xubin ticket-ka aad hadda ku jirto (Admins Only).')
+        .addUserOption(option => option.setName('user').setDescription('Xubinta la darayo').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('ticketremove')
+        .setDescription('Ka saar xubin ticket-ka aad hadda ku jirto (Admins Only).')
+        .addUserOption(option => option.setName('user').setDescription('Xubinta laga saarayo').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('ping')
+        .setDescription('Hubi in bot-ku shaqeynayo iyo latency-giisa.')
 ].map(command => command.toJSON());
 
-const getButtonsRow = () => {
-    return new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setLabel('Add Server 🔥')
-                .setStyle(ButtonStyle.Link)
-                .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot'),
-            new ButtonBuilder()
-                .setLabel('Contact Support 👍')
-                .setStyle(ButtonStyle.Link)
-                .setURL('https://discord.com/users/1483111151469465722')
-        );
+// ================== PANEL & BUTTON ROWS ==================
+const getPanelRow = (buttonLabel) => {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('open_ticket')
+            .setLabel(buttonLabel || 'Open Ticket')
+            .setEmoji('🎫')
+            .setStyle(ButtonStyle.Primary)
+    );
 };
 
-const getUnmuteRow = (userId) => {
-    return new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId(`unmute_${userId}`)
-                .setLabel('Unmute')
-                .setEmoji('🔓')
-                .setStyle(ButtonStyle.Success)
-        );
+const getTicketRow = () => {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('claim_ticket')
+            .setLabel('Claim')
+            .setEmoji('🙋')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('close_ticket')
+            .setLabel('Close Ticket')
+            .setEmoji('🔒')
+            .setStyle(ButtonStyle.Danger)
+    );
 };
 
-// 3. Markii bot-ku uu online soo galo
+// ================== READY ==================
 client.once('ready', async () => {
-    console.log(`🎉 Sky 🌟 waa diyaar! ${client.user.tag}`);
-    client.user.setActivity('Maamulka Server-ka', { type: ActivityType.Watching });
+    console.log(`🎉 Ticket Bot waa diyaar! ${client.user.tag}`);
+    client.user.setActivity('Tickets 🎫', { type: ActivityType.Watching });
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
@@ -172,446 +185,273 @@ client.once('ready', async () => {
     }
 });
 
-// 4. Marka Bot-ka lagu daro Server Cusub
-client.on('guildCreate', async (guild) => {
-    try {
-        const owner = await guild.fetchOwner();
-        if (!owner) return;
+// ================== HELPER: hubi in qofku Admin yahay ==================
+const isAdmin = (member) => member.permissions.has(PermissionFlagsBits.Administrator);
 
-        const embed = makeEmbed({
-            color: COLORS.brand,
-            title: `Hi ${owner.user.username} 👋`,
-            description: `Mahadsanid inaad **Sky 🌟** ku darto server-kaaga **${guild.name}**!\n\nGuji buttons-ka hoose si aad u aragto amarrada ama u hesho support.`
-        }).setThumbnail(client.user.displayAvatarURL());
-
-        await owner.send({
-            embeds: [embed],
-            components: [getButtonsRow()]
-        });
-    } catch (err) {
-        console.error('Wuu xirnaa DM-ka Owner-ka:', err);
-    }
-});
-
-// 5. Ka jawaabista Slash Commands & Buttons
+// ================== INTERACTIONS ==================
 client.on('interactionCreate', async interaction => {
 
-    // --- BUTTON: Unmute ---
-    if (interaction.isButton()) {
-        if (!interaction.customId.startsWith('unmute_')) return;
+    // ---------- SLASH COMMANDS ----------
+    if (interaction.isChatInputCommand()) {
+        const { commandName, guild, member } = interaction;
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        // --- /ping ---
+        if (commandName === 'ping') {
             return interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha ayaa isticmaali kara button-kan.' })],
+                embeds: [makeEmbed({ color: COLORS.info, description: `🏓 Pong! Latency: **${Date.now() - interaction.createdTimestamp}ms** | API: **${Math.round(client.ws.ping)}ms**` })],
                 ephemeral: true
             });
         }
 
-        const targetId = interaction.customId.replace('unmute_', '');
-        try {
-            const targetMember = await interaction.guild.members.fetch(targetId);
-            await targetMember.timeout(null, 'Unmute laga sameeyay admin');
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.success, title: '🔓 Unmute', description: `**${targetMember.user.tag}** waa laga qaaday mute-ka!` })],
-                ephemeral: true
-            });
-        } catch (err) {
-            console.error(err);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka qofka la unmute gareynayay (waxa laga yaabaa inuu maqan yahay server-ka).' })],
-                ephemeral: true
-            });
-        }
-        return;
-    }
-
-    if (!interaction.isChatInputCommand()) return;
-    const { commandName, channel, guild, member, user } = interaction;
-
-    // --- /help ---
-    if (commandName === 'help') {
-        const helpEmbed = makeEmbed({
-            color: COLORS.brand,
-            title: `👋 Hi ${user.username}, I'm Sky Bot`,
-            description: 'Waa kuwan amarrada aad isticmaali karto:',
-            fields: [
-                { name: '📢 /setwelcome', value: 'Samey Welcome Message', inline: true },
-                { name: '🧹 /clean', value: 'Ka tirtir farriimaha (1-100)', inline: true },
-                { name: '👢 /kick', value: 'User Kick Gareey', inline: true },
-                { name: '🔒 /lock', value: 'Xir Channel-ka', inline: true },
-                { name: '🔓 /unlock', value: 'Fur Channel-ka', inline: true },
-                { name: '⏱️ /slowmode', value: 'Saar daqiiqado Channel-ka', inline: true },
-                { name: '⏱️ /offslowmode', value: 'Ka qaad daqiiqadaha', inline: true },
-                { name: '🚫 /spam', value: 'Xir Hadalada Xun Xun', inline: true },
-                { name: '🔗 /antilinks', value: 'Shaqaali/Jooji ilaalinta Links-ka', inline: true }
-            ]
-        }).setThumbnail(client.user.displayAvatarURL())
-          .setDescription('Waqti dhow saaxiib! Waad ku mahadsantahay doorashada aad i dooratay 🔥');
-
-        try {
-            await user.send({ embeds: [helpEmbed], components: [getButtonsRow()] });
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.success, description: '✅ Macluumaadka bot-ka waxaa lagugu soo diray DM-kaaga!' })],
-                ephemeral: true
-            });
-        } catch (err) {
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Aad baan uga xumahay, ma kuu soo diri karo DM. Fadlan fur DM-kaaga.' })],
-                ephemeral: true
-            });
-        }
-        return;
-    }
-
-    if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({
-            embeds: [makeEmbed({ color: COLORS.error, description: '❌ **Ma haysatid oggolaansho!** Kaliya Maamulayaasha (**Administrator**) ayaa isticmaali kara amarradan.' })],
-            ephemeral: true
-        });
-    }
-
-    // --- /clean ---
-    if (commandName === 'clean') {
-        const amount = interaction.options.getInteger('amount');
-        if (amount < 1 || amount > 100) {
-            return interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.warning, description: '⚠️ Fadlan dooro tiro u dhaxeysa 1 ilaa 100 farriimood.' })],
-                ephemeral: true
-            });
-        }
-
-        try {
-            const deleted = await channel.bulkDelete(amount, true);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.success, title: '🧹 Clean', description: `Si guul leh ayaa channel-ka looga tirtiray **${deleted.size}** farriimood!` })],
-                ephemeral: true
-            });
-        } catch (err) {
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Waxaa dhacay khalad marka farriimaha la tirtirayay.' })],
-                ephemeral: true
-            });
-        }
-    }
-
-    // --- /setwelcome ---
-    if (commandName === 'setwelcome') {
-        const targetChannel = interaction.options.getChannel('channel');
-        const text = interaction.options.getString('text');
-
-        try {
-            await pgClient.query(`
-                INSERT INTO welcome (guild_id, channel_id, message_text)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (guild_id)
-                DO UPDATE SET channel_id = $2, message_text = $3;
-            `, [guild.id, targetChannel.id, text]);
-
-            await interaction.reply({
-                embeds: [makeEmbed({
-                    color: COLORS.success,
-                    title: '✅ Welcome Message',
-                    description: `Si guul leh ayaa loo kaydiyey soo dhoweynta!`,
-                    fields: [
-                        { name: 'Channel', value: `${targetChannel}`, inline: true },
-                        { name: 'Farriinta', value: text }
-                    ]
-                })],
-                ephemeral: true
-            });
-        } catch (err) {
-            console.error(err);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka xogta la kaydinayay.' })],
-                ephemeral: true
-            });
-        }
-    }
-
-    // --- /spam ---
-    if (commandName === 'spam') {
-        const inputString = interaction.options.getString('word').toLowerCase().trim();
-        const inputWords = inputString.split(/\s+/).filter(Boolean);
-
-        if (inputWords.length === 0) {
-            return interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.warning, description: '⚠️ Fadlan qor erayada aad rabto inaad mamnuucdo.' })],
-                ephemeral: true
-            });
-        }
-
-        try {
-            const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [guild.id]);
-
-            let currentWords = [];
-            if (res.rows.length > 0 && res.rows[0].words) {
-                currentWords = res.rows[0].words;
+        // --- /ticketsetup ---
+        if (commandName === 'ticketsetup') {
+            if (!isAdmin(member)) {
+                return interaction.reply({
+                    embeds: [makeEmbed({ color: COLORS.error, description: '❌ Kaliya Maamulayaasha ayaa isticmaali kara amarkan.' })],
+                    ephemeral: true
+                });
             }
 
-            let newWordsAdded = [];
+            const panelChannel = interaction.options.getChannel('channel');
+            const panelMessage = interaction.options.getString('message');
+            const buttonLabel = interaction.options.getString('button_text');
+            const openMessage = interaction.options.getString('open_message');
+            const mentionRole = interaction.options.getRole('mention_role');
+            const category = interaction.options.getChannel('category');
+            const logChannel = interaction.options.getChannel('log_channel');
 
-            for (const word of inputWords) {
-                if (!currentWords.includes(word)) {
-                    currentWords.push(word);
-                    newWordsAdded.push(word);
-                }
-            }
+            try {
+                await pgClient.query(`
+                    INSERT INTO ticket_config (guild_id, panel_channel_id, panel_message, button_label, open_message, mention_role_id, category_id, log_channel_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (guild_id)
+                    DO UPDATE SET panel_channel_id = $2, panel_message = $3, button_label = $4, open_message = $5, mention_role_id = $6, category_id = $7, log_channel_id = $8;
+                `, [guild.id, panelChannel.id, panelMessage, buttonLabel, openMessage, mentionRole.id, category ? category.id : null, logChannel ? logChannel.id : null]);
 
-            if (newWordsAdded.length > 0) {
-                if (res.rows.length === 0) {
-                    await pgClient.query('INSERT INTO spam (guild_id, words) VALUES ($1, $2)', [guild.id, currentWords]);
-                } else {
-                    await pgClient.query('UPDATE spam SET words = $2 WHERE guild_id = $1', [guild.id, currentWords]);
-                }
+                const panelEmbed = makeEmbed({
+                    color: COLORS.brand,
+                    title: '🎫 Support Tickets',
+                    description: panelMessage
+                }).setThumbnail(guild.iconURL());
+
+                await panelChannel.send({ embeds: [panelEmbed], components: [getPanelRow(buttonLabel)] });
 
                 await interaction.reply({
                     embeds: [makeEmbed({
                         color: COLORS.success,
-                        title: '🔒 Spam Words',
-                        description: `Eraydan soo socda mid mid ayaa loo kala mamnuucay, laguna kaydiyey Postgres:\n${newWordsAdded.map(w => `• **${w}**`).join('\n')}`
+                        description: `✅ Nidaamka Ticket-ka si guul leh ayaa loo diyaariyay!\nPanel-ka wuxuu ku yaalaa ${panelChannel}.`
                     })],
                     ephemeral: true
                 });
-            } else {
+            } catch (err) {
+                console.error(err);
                 await interaction.reply({
-                    embeds: [makeEmbed({ color: COLORS.info, description: 'ℹ️ Dhamaan erayada aad qortay horey ayay ugu jireen liiska erayada mamnuuca ah.' })],
+                    embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka nidaamka la diyaarinayay.' })],
                     ephemeral: true
                 });
             }
-
-        } catch (err) {
-            console.error(err);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka xogta la kala jabiyey ee la kaydinayay.' })],
-                ephemeral: true
-            });
-        }
-    }
-
-    // --- /lock ---
-    if (commandName === 'lock') {
-        try {
-            await channel.permissionOverwrites.edit(guild.roles.everyone, {
-                SendMessages: false,
-                CreatePublicThreads: false,
-                CreatePrivateThreads: false,
-                SendMessagesInThreads: false
-            });
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.warning, title: '🔒 Locked', description: '**Channel-kan waa la xiray gabi ahaanba!** Xubnuhu kaliya way daawan karaan (View Only).' })],
-                ephemeral: true
-            });
-        } catch (err) {
-            console.error(err);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Waxaa dhacay khalad marka channel-ka la xirayay.' })],
-                ephemeral: true
-            });
-        }
-    }
-
-    // --- /unlock ---
-    if (commandName === 'unlock') {
-        try {
-            await channel.permissionOverwrites.edit(guild.roles.everyone, {
-                SendMessages: null,
-                CreatePublicThreads: null,
-                CreatePrivateThreads: null,
-                SendMessagesInThreads: null
-            });
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.success, title: '🔓 Unlocked', description: '**Channel-kan waa la furay!** Xubnuhu caadi ahaan ayay wax u qori karaan.' })],
-                ephemeral: true
-            });
-        } catch (err) {
-            console.error(err);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Waxaa dhacay khalad marka channel-ka la furayay.' })],
-                ephemeral: true
-            });
-        }
-    }
-
-    // --- /kick ---
-    if (commandName === 'kick') {
-        const targetUser = interaction.options.getUser('user');
-        const targetMember = guild.members.cache.get(targetUser.id);
-        if (!targetMember || !targetMember.kickable) {
-            return interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Qofkan ma kick gareyn karo.' })],
-                ephemeral: true
-            });
-        }
-
-        await targetMember.kick();
-        await interaction.reply({
-            embeds: [makeEmbed({ color: COLORS.success, title: '👢 Kicked', description: `**${targetUser.tag}** si guul leh ayaa looga kick gareeyey!` })],
-            ephemeral: true
-        });
-    }
-
-    // --- /slowmode ---
-    if (commandName === 'slowmode') {
-        const seconds = interaction.options.getInteger('seconds');
-        await channel.setRateLimitPerUser(seconds);
-        await interaction.reply({
-            embeds: [makeEmbed({ color: COLORS.info, title: '⏱️ Slowmode', description: `Slowmode-ka waxaa lagu xiray **${seconds}** ilbiriqsi.` })],
-            ephemeral: true
-        });
-    }
-
-    // --- /offslowmode ---
-    if (commandName === 'offslowmode') {
-        await channel.setRateLimitPerUser(0);
-        await interaction.reply({
-            embeds: [makeEmbed({ color: COLORS.info, title: '⏱️ Slowmode', description: 'Slowmode-ka si guul leh ayaa looga qaaday!' })],
-            ephemeral: true
-        });
-    }
-
-    // --- /antilinks ---
-    if (commandName === 'antilinks') {
-        const status = interaction.options.getString('status');
-        const enabled = status === 'on';
-
-        try {
-            await pgClient.query(`
-                INSERT INTO antilinks (guild_id, enabled)
-                VALUES ($1, $2)
-                ON CONFLICT (guild_id)
-                DO UPDATE SET enabled = $2;
-            `, [guild.id, enabled]);
-
-            await interaction.reply({
-                embeds: [makeEmbed({
-                    color: enabled ? COLORS.success : COLORS.warning,
-                    title: '🔗 Antilinks',
-                    description: enabled
-                        ? '✅ **Antilinks waa la shaqaaliyay!** Hadda cidkasta oo link dhiga (xubno aan admin ahayn) waa la mute gareynayaa.'
-                        : '🛑 **Antilinks waa la joojiyay.**'
-                })],
-                ephemeral: true
-            });
-        } catch (err) {
-            console.error(err);
-            await interaction.reply({
-                embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka antilinks la habaynayay.' })],
-                ephemeral: true
-            });
-        }
-    }
-});
-
-// 6. Qabashada fariimaha (Spam, Antilinks & DM Auto-Responder)
-client.on('messageCreate', async message => {
-    if (message.author.bot) return;
-
-    // --- QAYBTA DM-KA ---
-    if (message.channel.type === ChannelType.DM) {
-        try {
-            const dmRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setLabel('Add Server 🔥')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL('https://discord.com/oauth2/authorize?client_id=1525477004005085287&permissions=8&integration_type=0&scope=bot')
-            );
-            const dmEmbed = makeEmbed({
-                color: COLORS.brand,
-                title: `Hi ${message.author.username} 👋`,
-                description: `Use **/** commands I'm Working! or Add Your Server 🔍`
-            }).setThumbnail(client.user.displayAvatarURL());
-
-            await message.author.send({ embeds: [dmEmbed], components: [dmRow] });
-        } catch (err) {
-            console.error(err);
-        }
-        return;
-    }
-
-    // --- QAYBTA SERVER-KA (Admin waa laga reebay labadaba) ---
-    if (!message.guild || !message.member) return;
-    if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-    // --- ANTILINKS ---
-    try {
-        const alRes = await pgClient.query('SELECT enabled FROM antilinks WHERE guild_id = $1', [message.guild.id]);
-        const antilinksEnabled = alRes.rows.length > 0 && alRes.rows[0].enabled;
-
-        if (antilinksEnabled && LINK_REGEX.test(message.content)) {
-            await message.delete().catch(() => null);
-
-            if (message.member.moderatable) {
-                await message.member.timeout(10 * 60 * 1000, 'Link dhigay oo aan la ogolayn').catch(() => null);
-            }
-
-            const warnEmbed = makeEmbed({
-                color: COLORS.warning,
-                title: '⚠️ Link La Ogola Maahan',
-                description: `${message.author} Fadlan Kama OgoLa Links Badan ⚠️\n\nWaxaa lagaa saaray hadal 10 daqiiqo ah.`
-            }).setThumbnail(message.author.displayAvatarURL());
-
-            await message.channel.send({
-                embeds: [warnEmbed],
-                components: [getUnmuteRow(message.author.id)]
-            });
             return;
         }
-    } catch (err) {
-        console.error(err);
-    }
 
-    // --- QAYBTA SERVER SPAM-KA ---
-    try {
-        const res = await pgClient.query('SELECT words FROM spam WHERE guild_id = $1', [message.guild.id]);
-        if (res.rows.length === 0) return;
-
-        const words = res.rows[0].words || [];
-        if (words.length === 0) return;
-
-        const contentLower = message.content.toLowerCase();
-        const hasSpam = words.some(word => contentLower.includes(word));
-
-        if (hasSpam) {
-            await message.delete();
-            const spamEmbed = makeEmbed({
-                color: COLORS.warning,
-                description: `⚠️ ${message.author}, farriintaada waa la tirtiray sababtoo ah waxay ka kooban tahay eray mamnuuc ah!`
-            });
-            const warning = await message.channel.send({ embeds: [spamEmbed] });
-            setTimeout(() => warning.delete().catch(() => null), 5000);
+        // --- /ticketclose ---
+        if (commandName === 'ticketclose') {
+            return closeTicket(interaction);
         }
-    } catch (err) {
-        console.error(err);
+
+        // --- /ticketadd ---
+        if (commandName === 'ticketadd') {
+            if (!isAdmin(member)) {
+                return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Kaliya Maamulayaasha ayaa isticmaali kara amarkan.' })], ephemeral: true });
+            }
+            const targetUser = interaction.options.getUser('user');
+            try {
+                const ticketRes = await pgClient.query('SELECT * FROM tickets WHERE channel_id = $1', [interaction.channel.id]);
+                if (ticketRes.rows.length === 0) {
+                    return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Channel-kani maaha ticket.' })], ephemeral: true });
+                }
+                await interaction.channel.permissionOverwrites.edit(targetUser.id, {
+                    ViewChannel: true, SendMessages: true, ReadMessageHistory: true
+                });
+                await interaction.reply({ embeds: [makeEmbed({ color: COLORS.success, description: `✅ ${targetUser} waa lagu daray ticket-kan.` })] });
+            } catch (err) {
+                console.error(err);
+                await interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay.' })], ephemeral: true });
+            }
+            return;
+        }
+
+        // --- /ticketremove ---
+        if (commandName === 'ticketremove') {
+            if (!isAdmin(member)) {
+                return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Kaliya Maamulayaasha ayaa isticmaali kara amarkan.' })], ephemeral: true });
+            }
+            const targetUser = interaction.options.getUser('user');
+            try {
+                const ticketRes = await pgClient.query('SELECT * FROM tickets WHERE channel_id = $1', [interaction.channel.id]);
+                if (ticketRes.rows.length === 0) {
+                    return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Channel-kani maaha ticket.' })], ephemeral: true });
+                }
+                await interaction.channel.permissionOverwrites.edit(targetUser.id, {
+                    ViewChannel: false, SendMessages: false, ReadMessageHistory: false
+                });
+                await interaction.reply({ embeds: [makeEmbed({ color: COLORS.warning, description: `🚫 ${targetUser} waa laga saaray ticket-kan.` })] });
+            } catch (err) {
+                console.error(err);
+                await interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay.' })], ephemeral: true });
+            }
+            return;
+        }
+    }
+
+    // ---------- BUTTONS ----------
+    if (interaction.isButton()) {
+
+        // --- Open Ticket ---
+        if (interaction.customId === 'open_ticket') {
+            await interaction.deferReply({ ephemeral: true });
+            const { guild, user } = interaction;
+
+            try {
+                const cfgRes = await pgClient.query('SELECT * FROM ticket_config WHERE guild_id = $1', [guild.id]);
+                if (cfgRes.rows.length === 0) {
+                    return interaction.editReply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Nidaamka Ticket-ka wali lama diyaarin. Fadlan admin-ku ha isticmaalo /ticketsetup.' })] });
+                }
+                const cfg = cfgRes.rows[0];
+
+                // Hubi in qofku hore u haysto ticket furan
+                const existing = await pgClient.query(
+                    `SELECT channel_id FROM tickets WHERE guild_id = $1 AND opener_id = $2 AND status = 'open'`,
+                    [guild.id, user.id]
+                );
+                if (existing.rows.length > 0) {
+                    return interaction.editReply({
+                        embeds: [makeEmbed({ color: COLORS.warning, description: `⚠️ Ticket ayaad hore u furatay: <#${existing.rows[0].channel_id}>` })]
+                    });
+                }
+
+                const counterRes = await pgClient.query(
+                    'UPDATE ticket_config SET ticket_counter = ticket_counter + 1 WHERE guild_id = $1 RETURNING ticket_counter',
+                    [guild.id]
+                );
+                const ticketNumber = String(counterRes.rows[0].ticket_counter).padStart(4, '0');
+
+                // Kaliya Opener-ka + Admins (Admins si otomaatig ah ayay u arki karaan permission bypass darteed,
+                // laakiin waxaan si sax ah u siinaynaa mention_role sidoo kale si ay u arki karaan)
+                const ticketChannel = await guild.channels.create({
+                    name: `ticket-${ticketNumber}`,
+                    type: ChannelType.GuildText,
+                    parent: cfg.category_id || null,
+                    permissionOverwrites: [
+                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+                        { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+                        { id: cfg.mention_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+                        { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] }
+                    ]
+                });
+
+                await pgClient.query(
+                    'INSERT INTO tickets (channel_id, guild_id, opener_id, status) VALUES ($1, $2, $3, $4)',
+                    [ticketChannel.id, guild.id, user.id, 'open']
+                );
+
+                const openMsg = (cfg.open_message || 'Hi {user}! Mahadsanid inaad soo gaadhay Support-ka.')
+                    .replace(/{user}/g, `${user}`);
+
+                const welcomeEmbed = makeEmbed({
+                    color: COLORS.brand,
+                    title: `🎫 Ticket #${ticketNumber}`,
+                    description: openMsg
+                }).setThumbnail(user.displayAvatarURL());
+
+                await ticketChannel.send({
+                    content: `${user} • <@&${cfg.mention_role_id}>`,
+                    embeds: [welcomeEmbed],
+                    components: [getTicketRow()]
+                });
+
+                await interaction.editReply({
+                    embeds: [makeEmbed({ color: COLORS.success, description: `✅ Ticket-kaaga waa la furay: ${ticketChannel}` })]
+                });
+            } catch (err) {
+                console.error(err);
+                await interaction.editReply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka ticket-ka la furayay.' })] });
+            }
+            return;
+        }
+
+        // --- Claim Ticket ---
+        if (interaction.customId === 'claim_ticket') {
+            if (!isAdmin(interaction.member)) {
+                return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Kaliya Maamulayaasha ayaa ticket-yada claim gareyn kara.' })], ephemeral: true });
+            }
+            try {
+                await pgClient.query('UPDATE tickets SET claimed_by = $1 WHERE channel_id = $2', [interaction.user.id, interaction.channel.id]);
+                await interaction.reply({
+                    embeds: [makeEmbed({ color: COLORS.success, description: `🙋 Ticket-kan waxaa claim gareeyay ${interaction.user}.` })]
+                });
+            } catch (err) {
+                console.error(err);
+                await interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay.' })], ephemeral: true });
+            }
+            return;
+        }
+
+        // --- Close Ticket ---
+        if (interaction.customId === 'close_ticket') {
+            return closeTicket(interaction);
+        }
     }
 });
 
-// 7. Nidaamka soo dhoweynta (Welcome)
-client.on('guildMemberAdd', async member => {
+// // ================== CLOSE TICKET LOGIC (Admins Only — isticmaalo button iyo /ticketclose labaduba) ==================
+async function closeTicket(interaction) {
+    const channel = interaction.channel;
+
+    if (!isAdmin(interaction.member)) {
+        return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Kaliya Maamulayaasha ayaa xiri kara ticket-yada.' })], ephemeral: true });
+    }
+
     try {
-        const res = await pgClient.query('SELECT channel_id, message_text FROM welcome WHERE guild_id = $1', [member.guild.id]);
-        if (res.rows.length === 0) return;
+        const ticketRes = await pgClient.query('SELECT * FROM tickets WHERE channel_id = $1', [channel.id]);
+        if (ticketRes.rows.length === 0) {
+            return interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Channel-kani maaha ticket.' })], ephemeral: true });
+        }
+        const ticket = ticketRes.rows[0];
 
-        const config = res.rows[0];
-        const welcomeChannel = member.guild.channels.cache.get(config.channel_id);
-        if (!welcomeChannel) return;
+        const cfgRes = await pgClient.query('SELECT log_channel_id FROM ticket_config WHERE guild_id = $1', [interaction.guild.id]);
+        const cfg = cfgRes.rows[0];
 
-        let msg = config.message_text
-            .replace(/{user}/g, `${member}`)
-            .replace(/{server}/g, `${member.guild.name}`);
+        await pgClient.query('UPDATE tickets SET status = $1 WHERE channel_id = $2', ['closed', channel.id]);
 
-        const welcomeEmbed = makeEmbed({
-            color: COLORS.brand,
-            title: `🎉 Welcome to ${member.guild.name}!`,
-            description: msg
-        }).setThumbnail(member.user.displayAvatarURL());
+        await interaction.reply({
+            embeds: [makeEmbed({ color: COLORS.warning, description: `🔒 Ticket-kan waxaa xiray ${interaction.user}. Channel-ka wuxuu si otomaatig ah u tirmi doonaa **5 ilbiriqsi** gudahood.` })]
+        });
 
-        welcomeChannel.send({ embeds: [welcomeEmbed] });
+        if (cfg?.log_channel_id) {
+            const logChannel = await interaction.guild.channels.fetch(cfg.log_channel_id).catch(() => null);
+            if (logChannel) {
+                await logChannel.send({
+                    embeds: [makeEmbed({
+                        color: COLORS.info,
+                        title: '📁 Ticket Closed',
+                        fields: [
+                            { name: 'Ticket', value: channel.name, inline: true },
+                            { name: 'Opener', value: `<@${ticket.opener_id}>`, inline: true },
+                            { name: 'Closed By', value: `${interaction.user}`, inline: true }
+                        ]
+                    })]
+                });
+            }
+        }
+
+        setTimeout(() => channel.delete().catch(() => null), 5000);
     } catch (err) {
         console.error(err);
+        await interaction.reply({ embeds: [makeEmbed({ color: COLORS.error, description: '❌ Khalad ayaa dhacay marka ticket-ka la xirayay.' })], ephemeral: true });
     }
-});
+}
 
-// 8. Ilaalinta process-ka
+// ================== PROCESS SAFETY ==================
 process.on('unhandledRejection', (err) => {
     console.error('⚠️ Unhandled Rejection (waa la maareeyay):', err);
 });
